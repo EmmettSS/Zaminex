@@ -306,7 +306,7 @@ function EditPropertyWizard({
             <h2 className="text-base font-semibold mb-1">اطلاعات پایه</h2>
             <Input label="عنوان ملک" value={form.title} onChange={(v) => set("title", v)} error={fieldErrors.title} required />
             <div className="grid grid-cols-2 gap-4">
-              <Input label="کد داخلی" value={form.internalCode} onChange={() => {}} readOnly error={fieldErrors.internalCode} required />
+              <Input label="کد داخلی" value={form.internalCode} onChange={() => {}} readOnly error={fieldErrors.internalCode} />
               <SelectField
                 label="نوع ملک"
                 value={form.propertyTypeRef}
