@@ -1,0 +1,2986 @@
+[
+  {
+    "model": "common.companysettings",
+    "pk": 1,
+    "fields": {
+      "company_name": "مشاور املاک زمینکس",
+      "license_number": "3541/1402",
+      "email": "admin@zaminex.ir",
+      "phone": "011-3322-5500",
+      "address": "مازندران، ساری، بلوار کشاورز، نبش خیابان فرهنگ، ساختمان زمینکس، طبقه دوم",
+      "updated_at": "2026-07-17T21:51:31.059Z"
+    }
+  },
+  {
+    "model": "basics.propertyusage",
+    "pk": 1,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.334Z",
+      "updated_at": "2026-07-29T17:13:40.334Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "residential",
+      "display_name": "مسکونی",
+      "sort_order": "10.00",
+      "meta_data": {}
+    }
+  },
+  {
+    "model": "basics.propertyusage",
+    "pk": 2,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.336Z",
+      "updated_at": "2026-07-29T17:13:40.336Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "commercial",
+      "display_name": "تجاری",
+      "sort_order": "20.00",
+      "meta_data": {}
+    }
+  },
+  {
+    "model": "basics.propertyusage",
+    "pk": 3,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.337Z",
+      "updated_at": "2026-07-29T17:13:40.337Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "office",
+      "display_name": "اداری",
+      "sort_order": "30.00",
+      "meta_data": {}
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 1,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.339Z",
+      "updated_at": "2026-07-29T17:13:40.339Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "apartment",
+      "display_name": "آپارتمان",
+      "sort_order": "10.00",
+      "meta_data": {},
+      "property_usage": 1,
+      "slug": "apartment"
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 2,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.341Z",
+      "updated_at": "2026-07-29T17:13:40.341Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "villa",
+      "display_name": "ویلا",
+      "sort_order": "20.00",
+      "meta_data": {},
+      "property_usage": 1,
+      "slug": "villa"
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 3,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.342Z",
+      "updated_at": "2026-07-29T17:13:40.342Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "townhouse",
+      "display_name": "خانه ویلایی",
+      "sort_order": "30.00",
+      "meta_data": {},
+      "property_usage": 1,
+      "slug": "townhouse"
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 4,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.343Z",
+      "updated_at": "2026-07-29T17:13:40.343Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "studio",
+      "display_name": "سوئیت",
+      "sort_order": "40.00",
+      "meta_data": {},
+      "property_usage": 1,
+      "slug": "studio"
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 5,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.344Z",
+      "updated_at": "2026-07-29T17:13:40.344Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "penthouse",
+      "display_name": "پنت‌هاوس",
+      "sort_order": "50.00",
+      "meta_data": {},
+      "property_usage": 1,
+      "slug": "penthouse"
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 6,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.345Z",
+      "updated_at": "2026-07-29T17:13:40.345Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "land",
+      "display_name": "زمین",
+      "sort_order": "60.00",
+      "meta_data": {},
+      "property_usage": 1,
+      "slug": "land"
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 7,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.346Z",
+      "updated_at": "2026-07-29T17:13:40.346Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "shop",
+      "display_name": "مغازه",
+      "sort_order": "10.00",
+      "meta_data": {},
+      "property_usage": 2,
+      "slug": "shop"
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 8,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.347Z",
+      "updated_at": "2026-07-29T17:13:40.347Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "commercial",
+      "display_name": "ملک تجاری",
+      "sort_order": "20.00",
+      "meta_data": {},
+      "property_usage": 2,
+      "slug": "commercial"
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 9,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.348Z",
+      "updated_at": "2026-07-29T17:13:40.348Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "warehouse",
+      "display_name": "انبار",
+      "sort_order": "30.00",
+      "meta_data": {},
+      "property_usage": 2,
+      "slug": "warehouse"
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 10,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.349Z",
+      "updated_at": "2026-07-29T17:13:40.350Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "office",
+      "display_name": "دفتر کار",
+      "sort_order": "10.00",
+      "meta_data": {},
+      "property_usage": 3,
+      "slug": "office"
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 11,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.351Z",
+      "updated_at": "2026-07-29T17:13:40.351Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "office_building",
+      "display_name": "ساختمان اداری",
+      "sort_order": "20.00",
+      "meta_data": {},
+      "property_usage": 3,
+      "slug": "office_building"
+    }
+  },
+  {
+    "model": "basics.propertytype",
+    "pk": 12,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.352Z",
+      "updated_at": "2026-07-29T17:14:01.759Z",
+      "is_active": false,
+      "deleted_at": null,
+      "name": "other",
+      "display_name": "سایر",
+      "sort_order": "900.00",
+      "meta_data": {},
+      "property_usage": 1,
+      "slug": "other"
+    }
+  },
+  {
+    "model": "basics.dealtype",
+    "pk": 1,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.353Z",
+      "updated_at": "2026-07-29T17:13:40.353Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "sale",
+      "display_name": "فروش",
+      "sort_order": "10.00",
+      "meta_data": {}
+    }
+  },
+  {
+    "model": "basics.dealtype",
+    "pk": 2,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.354Z",
+      "updated_at": "2026-07-29T17:13:40.354Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "mortgage_rent",
+      "display_name": "رهن و اجاره",
+      "sort_order": "20.00",
+      "meta_data": {}
+    }
+  },
+  {
+    "model": "basics.dealtype",
+    "pk": 3,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.355Z",
+      "updated_at": "2026-07-29T17:13:40.355Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "full_mortgage",
+      "display_name": "رهن کامل",
+      "sort_order": "30.00",
+      "meta_data": {}
+    }
+  },
+  {
+    "model": "basics.dealtype",
+    "pk": 4,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.356Z",
+      "updated_at": "2026-07-29T17:13:40.356Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "presale",
+      "display_name": "پیش‌فروش",
+      "sort_order": "40.00",
+      "meta_data": {}
+    }
+  },
+  {
+    "model": "basics.dealtype",
+    "pk": 5,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.357Z",
+      "updated_at": "2026-07-29T17:13:40.357Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "exchange",
+      "display_name": "معاوضه",
+      "sort_order": "50.00",
+      "meta_data": {}
+    }
+  },
+  {
+    "model": "basics.dealtype",
+    "pk": 6,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.358Z",
+      "updated_at": "2026-07-29T17:13:40.358Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "partnership",
+      "display_name": "مشارکت در ساخت",
+      "sort_order": "60.00",
+      "meta_data": {}
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 1,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.360Z",
+      "updated_at": "2026-07-29T17:13:40.360Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "area",
+      "display_name": "متراژ",
+      "sort_order": "10.00",
+      "meta_data": {},
+      "data_type": "decimal",
+      "input_type": "default",
+      "filter_type": "range_fast",
+      "entity": "property",
+      "unit": "متر مربع",
+      "is_facility": false,
+      "is_core": true,
+      "core_field": "area"
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 2,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.361Z",
+      "updated_at": "2026-07-29T17:13:40.361Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "rooms",
+      "display_name": "تعداد اتاق",
+      "sort_order": "20.00",
+      "meta_data": {},
+      "data_type": "integer",
+      "input_type": "default",
+      "filter_type": "range",
+      "entity": "property",
+      "unit": "عدد",
+      "is_facility": false,
+      "is_core": true,
+      "core_field": "rooms"
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 3,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.362Z",
+      "updated_at": "2026-07-29T17:13:40.362Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "floor",
+      "display_name": "طبقه",
+      "sort_order": "30.00",
+      "meta_data": {},
+      "data_type": "integer",
+      "input_type": "default",
+      "filter_type": "range",
+      "entity": "property",
+      "unit": "",
+      "is_facility": false,
+      "is_core": true,
+      "core_field": "floor"
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 4,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.363Z",
+      "updated_at": "2026-07-29T17:13:40.363Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "built_year",
+      "display_name": "سال ساخت",
+      "sort_order": "40.00",
+      "meta_data": {},
+      "data_type": "integer",
+      "input_type": "default",
+      "filter_type": "range",
+      "entity": "property",
+      "unit": "",
+      "is_facility": false,
+      "is_core": true,
+      "core_field": "built_year"
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 5,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.365Z",
+      "updated_at": "2026-07-29T17:13:40.365Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "total_floors",
+      "display_name": "تعداد کل طبقات",
+      "sort_order": "50.00",
+      "meta_data": {},
+      "data_type": "integer",
+      "input_type": "default",
+      "filter_type": "range",
+      "entity": "property",
+      "unit": "",
+      "is_facility": false,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 6,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.366Z",
+      "updated_at": "2026-07-29T17:13:40.366Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "units_per_floor",
+      "display_name": "واحد در طبقه",
+      "sort_order": "60.00",
+      "meta_data": {},
+      "data_type": "integer",
+      "input_type": "default",
+      "filter_type": "exact",
+      "entity": "property",
+      "unit": "",
+      "is_facility": false,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 7,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.367Z",
+      "updated_at": "2026-07-29T17:13:40.367Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "building_direction",
+      "display_name": "جهت ساختمان",
+      "sort_order": "70.00",
+      "meta_data": {},
+      "data_type": "select",
+      "input_type": "default",
+      "filter_type": "exact",
+      "entity": "property",
+      "unit": "",
+      "is_facility": false,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 8,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.368Z",
+      "updated_at": "2026-07-29T17:13:40.368Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "document_type",
+      "display_name": "نوع سند",
+      "sort_order": "80.00",
+      "meta_data": {},
+      "data_type": "select",
+      "input_type": "default",
+      "filter_type": "exact",
+      "entity": "property",
+      "unit": "",
+      "is_facility": false,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 9,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.369Z",
+      "updated_at": "2026-07-29T17:13:40.369Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "renovation_status",
+      "display_name": "وضعیت بازسازی",
+      "sort_order": "90.00",
+      "meta_data": {},
+      "data_type": "select",
+      "input_type": "default",
+      "filter_type": "exact",
+      "entity": "property",
+      "unit": "",
+      "is_facility": false,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 10,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.371Z",
+      "updated_at": "2026-07-29T17:13:40.371Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "land_area",
+      "display_name": "متراژ زمین",
+      "sort_order": "100.00",
+      "meta_data": {},
+      "data_type": "decimal",
+      "input_type": "default",
+      "filter_type": "range",
+      "entity": "property",
+      "unit": "متر مربع",
+      "is_facility": false,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 11,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.372Z",
+      "updated_at": "2026-07-29T17:13:40.372Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "building_area",
+      "display_name": "متراژ بنا",
+      "sort_order": "110.00",
+      "meta_data": {},
+      "data_type": "decimal",
+      "input_type": "default",
+      "filter_type": "range",
+      "entity": "property",
+      "unit": "متر مربع",
+      "is_facility": false,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 12,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.373Z",
+      "updated_at": "2026-07-29T17:13:40.373Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "frontage",
+      "display_name": "بر زمین",
+      "sort_order": "120.00",
+      "meta_data": {},
+      "data_type": "decimal",
+      "input_type": "default",
+      "filter_type": "range",
+      "entity": "property",
+      "unit": "متر",
+      "is_facility": false,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 13,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.375Z",
+      "updated_at": "2026-07-29T17:13:40.375Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "bathrooms",
+      "display_name": "تعداد سرویس بهداشتی",
+      "sort_order": "130.00",
+      "meta_data": {},
+      "data_type": "integer",
+      "input_type": "default",
+      "filter_type": "range",
+      "entity": "property",
+      "unit": "عدد",
+      "is_facility": false,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 14,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.376Z",
+      "updated_at": "2026-07-29T17:13:40.376Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "shop_width",
+      "display_name": "دهنه مغازه",
+      "sort_order": "140.00",
+      "meta_data": {},
+      "data_type": "decimal",
+      "input_type": "default",
+      "filter_type": "range",
+      "entity": "property",
+      "unit": "متر",
+      "is_facility": false,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 15,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.378Z",
+      "updated_at": "2026-07-29T17:13:40.378Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "has_balcony",
+      "display_name": "بالکن",
+      "sort_order": "200.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 16,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.379Z",
+      "updated_at": "2026-07-29T17:13:40.379Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "parking",
+      "display_name": "پارکینگ",
+      "sort_order": "210.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 17,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.380Z",
+      "updated_at": "2026-07-29T17:13:40.380Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "elevator",
+      "display_name": "آسانسور",
+      "sort_order": "220.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 18,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.382Z",
+      "updated_at": "2026-07-29T17:13:40.382Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "storage",
+      "display_name": "انباری",
+      "sort_order": "230.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 19,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.383Z",
+      "updated_at": "2026-07-29T17:13:40.383Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "pool",
+      "display_name": "استخر",
+      "sort_order": "240.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 20,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.385Z",
+      "updated_at": "2026-07-29T17:13:40.385Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "sauna",
+      "display_name": "سونا",
+      "sort_order": "250.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 21,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.386Z",
+      "updated_at": "2026-07-29T17:13:40.386Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "jacuzzi",
+      "display_name": "جکوزی",
+      "sort_order": "260.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 22,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.387Z",
+      "updated_at": "2026-07-29T17:13:40.387Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "security_guard",
+      "display_name": "نگهبانی",
+      "sort_order": "270.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 23,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.389Z",
+      "updated_at": "2026-07-29T17:13:40.389Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "central_antenna",
+      "display_name": "آنتن مرکزی",
+      "sort_order": "280.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 24,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.390Z",
+      "updated_at": "2026-07-29T17:13:40.390Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "remote_door",
+      "display_name": "درب ریموت",
+      "sort_order": "290.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 25,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.391Z",
+      "updated_at": "2026-07-29T17:13:40.391Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "water_well",
+      "display_name": "چاه آب",
+      "sort_order": "300.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 26,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.393Z",
+      "updated_at": "2026-07-29T17:13:40.393Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "electricity",
+      "display_name": "برق",
+      "sort_order": "310.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attribute",
+    "pk": 27,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.394Z",
+      "updated_at": "2026-07-29T17:13:40.394Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "gas",
+      "display_name": "گاز",
+      "sort_order": "320.00",
+      "meta_data": {},
+      "data_type": "boolean",
+      "input_type": "default",
+      "filter_type": "exists",
+      "entity": "property",
+      "unit": "",
+      "is_facility": true,
+      "is_core": false,
+      "core_field": ""
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 1,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.396Z",
+      "updated_at": "2026-07-29T17:14:01.261Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 7,
+      "value": "north",
+      "display_name": "شمالی",
+      "sort_order": "10.00"
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 2,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.398Z",
+      "updated_at": "2026-07-29T17:14:01.263Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 7,
+      "value": "south",
+      "display_name": "جنوبی",
+      "sort_order": "20.00"
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 3,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.400Z",
+      "updated_at": "2026-07-29T17:14:01.264Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 7,
+      "value": "east",
+      "display_name": "شرقی",
+      "sort_order": "30.00"
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 4,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.402Z",
+      "updated_at": "2026-07-29T17:14:01.265Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 7,
+      "value": "west",
+      "display_name": "غربی",
+      "sort_order": "40.00"
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 5,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.403Z",
+      "updated_at": "2026-07-29T17:14:01.266Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 7,
+      "value": "north_south",
+      "display_name": "شمالی جنوبی",
+      "sort_order": "50.00"
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 6,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.405Z",
+      "updated_at": "2026-07-29T17:14:01.267Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 8,
+      "value": "single_deed",
+      "display_name": "تک برگ",
+      "sort_order": "10.00"
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 7,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.406Z",
+      "updated_at": "2026-07-29T17:14:01.269Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 8,
+      "value": "shared_deed",
+      "display_name": "مشاع",
+      "sort_order": "20.00"
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 8,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.407Z",
+      "updated_at": "2026-07-29T17:14:01.270Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 8,
+      "value": "endowment",
+      "display_name": "وقفی",
+      "sort_order": "30.00"
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 9,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.408Z",
+      "updated_at": "2026-07-29T17:14:01.271Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 8,
+      "value": "agreement",
+      "display_name": "قولنامه‌ای",
+      "sort_order": "40.00"
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 10,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.410Z",
+      "updated_at": "2026-07-29T17:14:01.272Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 9,
+      "value": "new",
+      "display_name": "نوساز",
+      "sort_order": "10.00"
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 11,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.411Z",
+      "updated_at": "2026-07-29T17:14:01.273Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 9,
+      "value": "renovated",
+      "display_name": "بازسازی شده",
+      "sort_order": "20.00"
+    }
+  },
+  {
+    "model": "basics.attributeoption",
+    "pk": 12,
+    "fields": {
+      "created_at": "2026-07-29T17:13:40.412Z",
+      "updated_at": "2026-07-29T17:14:01.275Z",
+      "is_active": true,
+      "deleted_at": null,
+      "attribute": 9,
+      "value": "needs_renovation",
+      "display_name": "نیاز به بازسازی",
+      "sort_order": "30.00"
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 1,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 2,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 3,
+    "fields": {
+      "attribute": 3,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 4,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 5,
+    "fields": {
+      "attribute": 5,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 6,
+    "fields": {
+      "attribute": 6,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 7,
+    "fields": {
+      "attribute": 7,
+      "sort_order": "70.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 8,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "80.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 9,
+    "fields": {
+      "attribute": 9,
+      "sort_order": "90.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 10,
+    "fields": {
+      "attribute": 13,
+      "sort_order": "100.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 11,
+    "fields": {
+      "attribute": 15,
+      "sort_order": "110.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 12,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "120.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 13,
+    "fields": {
+      "attribute": 17,
+      "sort_order": "130.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 14,
+    "fields": {
+      "attribute": 18,
+      "sort_order": "140.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 15,
+    "fields": {
+      "attribute": 22,
+      "sort_order": "150.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 16,
+    "fields": {
+      "attribute": 24,
+      "sort_order": "160.00",
+      "is_active": true,
+      "property_type": 1,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 17,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 18,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 19,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 20,
+    "fields": {
+      "attribute": 10,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 21,
+    "fields": {
+      "attribute": 11,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 22,
+    "fields": {
+      "attribute": 7,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 23,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "70.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 24,
+    "fields": {
+      "attribute": 9,
+      "sort_order": "80.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 25,
+    "fields": {
+      "attribute": 13,
+      "sort_order": "90.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 26,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "100.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 27,
+    "fields": {
+      "attribute": 19,
+      "sort_order": "110.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 28,
+    "fields": {
+      "attribute": 20,
+      "sort_order": "120.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 29,
+    "fields": {
+      "attribute": 21,
+      "sort_order": "130.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 30,
+    "fields": {
+      "attribute": 18,
+      "sort_order": "140.00",
+      "is_active": true,
+      "property_type": 2,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 31,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 3,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 32,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 3,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 33,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 3,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 34,
+    "fields": {
+      "attribute": 10,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 3,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 35,
+    "fields": {
+      "attribute": 11,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 3,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 36,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 3,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 37,
+    "fields": {
+      "attribute": 13,
+      "sort_order": "70.00",
+      "is_active": true,
+      "property_type": 3,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 38,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "80.00",
+      "is_active": true,
+      "property_type": 3,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 39,
+    "fields": {
+      "attribute": 18,
+      "sort_order": "90.00",
+      "is_active": true,
+      "property_type": 3,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 40,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 4,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 41,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 4,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 42,
+    "fields": {
+      "attribute": 3,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 4,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 43,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 4,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 44,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 4,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 45,
+    "fields": {
+      "attribute": 13,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 4,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 46,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "70.00",
+      "is_active": true,
+      "property_type": 4,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 47,
+    "fields": {
+      "attribute": 17,
+      "sort_order": "80.00",
+      "is_active": true,
+      "property_type": 4,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 48,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 49,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 50,
+    "fields": {
+      "attribute": 3,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 51,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 52,
+    "fields": {
+      "attribute": 5,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 53,
+    "fields": {
+      "attribute": 7,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 54,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "70.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 55,
+    "fields": {
+      "attribute": 13,
+      "sort_order": "80.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 56,
+    "fields": {
+      "attribute": 15,
+      "sort_order": "90.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 57,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "100.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 58,
+    "fields": {
+      "attribute": 17,
+      "sort_order": "110.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 59,
+    "fields": {
+      "attribute": 18,
+      "sort_order": "120.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 60,
+    "fields": {
+      "attribute": 19,
+      "sort_order": "130.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 61,
+    "fields": {
+      "attribute": 21,
+      "sort_order": "140.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 62,
+    "fields": {
+      "attribute": 22,
+      "sort_order": "150.00",
+      "is_active": true,
+      "property_type": 5,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 63,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 6,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 64,
+    "fields": {
+      "attribute": 10,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 6,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 65,
+    "fields": {
+      "attribute": 12,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 6,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 66,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 6,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 67,
+    "fields": {
+      "attribute": 25,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 6,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 68,
+    "fields": {
+      "attribute": 26,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 6,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 69,
+    "fields": {
+      "attribute": 27,
+      "sort_order": "70.00",
+      "is_active": true,
+      "property_type": 6,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 70,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 7,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 71,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 7,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 72,
+    "fields": {
+      "attribute": 14,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 7,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 73,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 7,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 74,
+    "fields": {
+      "attribute": 13,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 7,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 75,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 7,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 76,
+    "fields": {
+      "attribute": 18,
+      "sort_order": "70.00",
+      "is_active": true,
+      "property_type": 7,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 77,
+    "fields": {
+      "attribute": 22,
+      "sort_order": "80.00",
+      "is_active": true,
+      "property_type": 7,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 78,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 8,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 79,
+    "fields": {
+      "attribute": 3,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 8,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 80,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 8,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 81,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 8,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 82,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 8,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 83,
+    "fields": {
+      "attribute": 17,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 8,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 84,
+    "fields": {
+      "attribute": 22,
+      "sort_order": "70.00",
+      "is_active": true,
+      "property_type": 8,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 85,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 9,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 86,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 9,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 87,
+    "fields": {
+      "attribute": 10,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 9,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 88,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 9,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 89,
+    "fields": {
+      "attribute": 26,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 9,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 90,
+    "fields": {
+      "attribute": 27,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 9,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 91,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 10,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 92,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 10,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 93,
+    "fields": {
+      "attribute": 3,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 10,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 94,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 10,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 95,
+    "fields": {
+      "attribute": 5,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 10,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 96,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 10,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 97,
+    "fields": {
+      "attribute": 13,
+      "sort_order": "70.00",
+      "is_active": true,
+      "property_type": 10,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 98,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "80.00",
+      "is_active": true,
+      "property_type": 10,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 99,
+    "fields": {
+      "attribute": 17,
+      "sort_order": "90.00",
+      "is_active": true,
+      "property_type": 10,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 100,
+    "fields": {
+      "attribute": 22,
+      "sort_order": "100.00",
+      "is_active": true,
+      "property_type": 10,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 101,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 11,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 102,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 11,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 103,
+    "fields": {
+      "attribute": 5,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 11,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 104,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 11,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 105,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 11,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 106,
+    "fields": {
+      "attribute": 17,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 11,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 107,
+    "fields": {
+      "attribute": 22,
+      "sort_order": "70.00",
+      "is_active": true,
+      "property_type": 11,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 108,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 12,
+      "is_required": true
+    }
+  },
+  {
+    "model": "basics.propertytypeattribute",
+    "pk": 109,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 12,
+      "is_required": false
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 1,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 1
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 2,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 1
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 3,
+    "fields": {
+      "attribute": 3,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 1
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 4,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 1
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 5,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 1
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 6,
+    "fields": {
+      "attribute": 17,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 1
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 7,
+    "fields": {
+      "attribute": 18,
+      "sort_order": "70.00",
+      "is_active": true,
+      "property_type": 1
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 8,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 2
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 9,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 2
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 10,
+    "fields": {
+      "attribute": 10,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 2
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 11,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 2
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 12,
+    "fields": {
+      "attribute": 19,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 2
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 13,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 2
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 14,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 3
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 15,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 3
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 16,
+    "fields": {
+      "attribute": 10,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 3
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 17,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 3
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 18,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 3
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 19,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 4
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 20,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 4
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 21,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 4
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 22,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 4
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 23,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 5
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 24,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 5
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 25,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 5
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 26,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 5
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 27,
+    "fields": {
+      "attribute": 17,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 5
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 28,
+    "fields": {
+      "attribute": 19,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 5
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 29,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 6
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 30,
+    "fields": {
+      "attribute": 10,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 6
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 31,
+    "fields": {
+      "attribute": 12,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 6
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 32,
+    "fields": {
+      "attribute": 8,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 6
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 33,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 7
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 34,
+    "fields": {
+      "attribute": 14,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 7
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 35,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 7
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 36,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 7
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 37,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 8
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 38,
+    "fields": {
+      "attribute": 3,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 8
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 39,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 8
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 40,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 8
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 41,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 9
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 42,
+    "fields": {
+      "attribute": 10,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 9
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 43,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 9
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 44,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 10
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 45,
+    "fields": {
+      "attribute": 2,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 10
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 46,
+    "fields": {
+      "attribute": 3,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 10
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 47,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 10
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 48,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 10
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 49,
+    "fields": {
+      "attribute": 17,
+      "sort_order": "60.00",
+      "is_active": true,
+      "property_type": 10
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 50,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 11
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 51,
+    "fields": {
+      "attribute": 5,
+      "sort_order": "20.00",
+      "is_active": true,
+      "property_type": 11
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 52,
+    "fields": {
+      "attribute": 4,
+      "sort_order": "30.00",
+      "is_active": true,
+      "property_type": 11
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 53,
+    "fields": {
+      "attribute": 16,
+      "sort_order": "40.00",
+      "is_active": true,
+      "property_type": 11
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 54,
+    "fields": {
+      "attribute": 17,
+      "sort_order": "50.00",
+      "is_active": true,
+      "property_type": 11
+    }
+  },
+  {
+    "model": "basics.propertytypesearchattribute",
+    "pk": 55,
+    "fields": {
+      "attribute": 1,
+      "sort_order": "10.00",
+      "is_active": true,
+      "property_type": 12
+    }
+  },
+  {
+    "model": "basics.province",
+    "pk": 1,
+    "fields": {
+      "created_at": "2026-07-30T10:13:49.203Z",
+      "updated_at": "2026-07-30T10:13:49.203Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "مازندران",
+      "display_name": "مازندران",
+      "sort_order": "0.00",
+      "meta_data": {},
+      "slug": "مازندران"
+    }
+  },
+  {
+    "model": "basics.city",
+    "pk": 1,
+    "fields": {
+      "created_at": "2026-07-30T10:13:49.208Z",
+      "updated_at": "2026-07-30T10:13:49.208Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "ساری",
+      "display_name": "ساری",
+      "sort_order": "0.00",
+      "meta_data": {},
+      "province": 1,
+      "slug": "ساری"
+    }
+  },
+  {
+    "model": "basics.district",
+    "pk": 1,
+    "fields": {
+      "created_at": "2026-07-30T10:13:49.214Z",
+      "updated_at": "2026-07-30T10:13:49.214Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "بلوار-کشاورز",
+      "display_name": "بلوار کشاورز",
+      "sort_order": "10.00",
+      "meta_data": {},
+      "city": 1,
+      "slug": "ساری-بلوار-کشاورز"
+    }
+  },
+  {
+    "model": "basics.district",
+    "pk": 2,
+    "fields": {
+      "created_at": "2026-07-30T10:13:49.216Z",
+      "updated_at": "2026-07-30T10:13:49.216Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "مرکزی",
+      "display_name": "مرکزی",
+      "sort_order": "20.00",
+      "meta_data": {},
+      "city": 1,
+      "slug": "ساری-مرکزی"
+    }
+  },
+  {
+    "model": "basics.district",
+    "pk": 3,
+    "fields": {
+      "created_at": "2026-07-30T10:13:49.218Z",
+      "updated_at": "2026-07-30T10:13:59.022Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "میدان-ساعت",
+      "display_name": "میدان ساعت",
+      "sort_order": "30.00",
+      "meta_data": {},
+      "city": 1,
+      "slug": "ساری-میدان-ساعت"
+    }
+  },
+  {
+    "model": "basics.district",
+    "pk": 4,
+    "fields": {
+      "created_at": "2026-07-30T10:13:49.219Z",
+      "updated_at": "2026-07-30T10:13:49.219Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "مهدیآباد",
+      "display_name": "مهدی‌آباد",
+      "sort_order": "40.00",
+      "meta_data": {},
+      "city": 1,
+      "slug": "ساری-مهدیآباد"
+    }
+  },
+  {
+    "model": "basics.district",
+    "pk": 5,
+    "fields": {
+      "created_at": "2026-07-30T10:13:49.220Z",
+      "updated_at": "2026-07-30T10:13:49.220Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "ششصد-دستگاه",
+      "display_name": "ششصد دستگاه",
+      "sort_order": "50.00",
+      "meta_data": {},
+      "city": 1,
+      "slug": "ساری-ششصد-دستگاه"
+    }
+  },
+  {
+    "model": "basics.district",
+    "pk": 6,
+    "fields": {
+      "created_at": "2026-07-30T10:13:49.222Z",
+      "updated_at": "2026-07-30T10:13:49.222Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "آزادی",
+      "display_name": "آزادی",
+      "sort_order": "60.00",
+      "meta_data": {},
+      "city": 1,
+      "slug": "ساری-آزادی"
+    }
+  },
+  {
+    "model": "basics.district",
+    "pk": 7,
+    "fields": {
+      "created_at": "2026-07-30T10:13:49.223Z",
+      "updated_at": "2026-07-30T10:13:49.223Z",
+      "is_active": true,
+      "deleted_at": null,
+      "name": "daryashahr",
+      "display_name": "Daryashahr",
+      "sort_order": "70.00",
+      "meta_data": {},
+      "city": 1,
+      "slug": "ساری-daryashahr"
+    }
+  }
+]

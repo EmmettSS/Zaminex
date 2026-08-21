@@ -1,0 +1,36 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+
+/* Leaflet tiles and click coordinates drift inside dir=rtl documents.
+   Force LTR on the map surface so a click lands on the same visual point. */
+.zaminex-map-picker.leaflet-container {
+  direction: ltr;
+}
+
+/* Keep the property-location map clean while still crediting OpenStreetMap
+   (attribution is required by ODbL). Scoped to the add/edit form map only. */
+.zaminex-map-picker .leaflet-control-attribution {
+  font-size: 8px;
+  opacity: 0.45;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+/* Consultant property map popup: strip Leaflet's default frame so the
+   Tailwind-styled card inside controls the appearance. */
+.leaflet-popup.zaminex-popup .leaflet-popup-content-wrapper {
+  padding: 0;
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+  background: #fff;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+.leaflet-popup.zaminex-popup .leaflet-popup-content {
+  margin: 0;
+  width: auto !important;
+}
+.leaflet-popup.zaminex-popup .leaflet-popup-tip {
+  background: #fff;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+}
