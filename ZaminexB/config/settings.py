@@ -236,6 +236,18 @@ LOGIN_FAILURE_LIMIT = 5
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 10 * 60
 
+# ---------------------------------------------------------------------------
+# SMS OTP login
+# ---------------------------------------------------------------------------
+# One-time codes for «ورود با کد پیامکی». All values are read through
+# apps.accounts.sms helpers, which fall back to these defaults when a setting
+# is missing, so deployments can override them without touching code.
+SMS_OTP_LENGTH = 6
+SMS_OTP_TTL_SECONDS = 2 * 60
+SMS_OTP_MAX_ATTEMPTS = 5
+SMS_OTP_RESEND_COOLDOWN_SECONDS = 60
+SMS_REQUEST_TIMEOUT = 10
+
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
@@ -274,6 +286,10 @@ REST_FRAMEWORK = {
         "ai": "10/hour",
         "export": "10/hour",
         "file_upload": "20/min",
+        # SMS OTP login: sending codes costs real SMS credit and verification
+        # is a brute-force surface, so both are throttled per client IP.
+        "sms_request": "10/hour",
+        "sms_verify": "20/min",
     },
 }
 

@@ -27,6 +27,7 @@ const ADMIN_PAGES: NavPageItem[] = [
   { page: "my-profile", label: "پروفایل من", section: "پروفایل", keywords: "نمای کلی" },
   { page: "my-profile-edit", label: "ویرایش پروفایل", section: "پروفایل" },
   { page: "my-profile-security", label: "امنیت", section: "پروفایل" },
+  { page: "my-profile-login-options", label: "گزینه‌های ورود", section: "پروفایل", keywords: "ورود پیامک رمز" },
   { page: "settings-workspace", label: "تنظیمات فضای کاری", section: "سیستم", keywords: "تنظیمات" },
   { page: "settings-permissions", label: "دسترسی‌ها", section: "سیستم", keywords: "تنظیمات" },
 ];

@@ -1,18 +1,51 @@
-from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth import login, update_session_auth_hash
 from django.contrib.auth.views import LoginView
 from django.db import transaction
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import ensure_csrf_cookie
 
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import BasePermission, IsAuthenticated
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .forms import INACTIVE_ACCOUNT_MESSAGE, ZaminexAuthenticationForm
-from .models import AdminProfile, ConsultantProfile, UserRole
+from .models import AdminProfile, ConsultantProfile, LoginMethod, UserRole
 from .serializers import AdminProfileSerializer, ConsultantProfileSerializer
+from .sms import (
+    OtpVerificationError,
+    SmsSendError,
+    active_login_method,
+    find_user_by_mobile,
+    is_sms_configured,
+    issue_code,
+    normalize_mobile,
+    otp_length,
+    resend_cooldown_remaining,
+    send_verification_code,
+    set_login_method,
+    verify_code,
+)
+from .throttles import SmsRequestRateThrottle, SmsVerifyRateThrottle
+
+
+def _safe_next_url(request) -> str:
+    """Validate the ``next`` parameter the same way Django's LoginView does.
+
+    The SPA redirects the browser to the returned value after a successful SMS
+    login, so an unvalidated ``next`` would be an open-redirect vector.
+    """
+    next_url = (request.data.get("next") or "").strip()
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return "/"
 
 
 @method_decorator(ensure_csrf_cookie, name="dispatch")
@@ -34,6 +67,9 @@ class CustomLoginView(LoginView):
             "logoutUrl": "/accounts/logout/",
             "csrfToken": get_token(self.request),
             "next": self.request.GET.get("next", "/"),
+            # Which form the login screen shows is decided server-side by the
+            # admin's global «گزینه‌های ورود» switch.
+            "loginMethod": active_login_method(),
         }
 
         form = context.get("form")
@@ -62,6 +98,121 @@ class IsAdminRole(BasePermission):
             request.user
             and request.user.is_authenticated
             and getattr(request.user, "role", "") == UserRole.ADMIN
+        )
+
+
+class LoginOptionsView(APIView):
+    """Admin-only: read/change the active login method (password vs SMS).
+
+    The value is a global singleton, so whatever the admin picks here becomes
+    the system's login behaviour immediately (including for the login page).
+    """
+
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        return Response(
+            {"method": active_login_method(), "smsConfigured": is_sms_configured()}
+        )
+
+    def patch(self, request):
+        method = (request.data.get("method") or "").strip()
+        if method not in LoginMethod.values:
+            return Response(
+                {"detail": "روش ورود انتخاب‌شده معتبر نیست."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        set_login_method(method)
+        return Response(
+            {"method": method, "smsConfigured": is_sms_configured()}
+        )
+
+
+class SmsLoginRequestView(APIView):
+    """Anonymous: request an OTP for the given mobile number."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [SmsRequestRateThrottle]
+
+    def post(self, request):
+        if active_login_method() != LoginMethod.SMS:
+            return Response(
+                {"detail": "ورود با کد پیامکی در حال حاضر غیرفعال است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_mobile = (request.data.get("mobile") or "").strip()
+        try:
+            mobile = normalize_mobile(raw_mobile)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        user, _reason = find_user_by_mobile(mobile)
+        if user is None:
+            # Anti-enumeration: the answer is identical whether or not the
+            # number is registered, so the endpoint cannot be used to probe
+            # which mobiles have an account.
+            return Response(
+                {"detail": "در صورت ثبت بودن شماره، کد تأیید برای شما پیامک می‌شود."},
+                status=status.HTTP_200_OK,
+            )
+
+        cooldown = resend_cooldown_remaining(mobile)
+        if cooldown > 0:
+            return Response(
+                {"detail": f"ارسال کد به‌تازگی انجام شده است. {cooldown} ثانیه دیگر صبر کنید."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        try:
+            code = issue_code(mobile)
+            send_verification_code(mobile, code)
+        except SmsSendError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+
+        return Response(
+            {"detail": "کد تأیید برای شماره شما پیامک شد."},
+            status=status.HTTP_200_OK,
+        )
+
+
+class SmsLoginVerifyView(APIView):
+    """Anonymous: verify an OTP and start an authenticated session."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [SmsVerifyRateThrottle]
+
+    def post(self, request):
+        if active_login_method() != LoginMethod.SMS:
+            return Response(
+                {"detail": "ورود با کد پیامکی در حال حاضر غیرفعال است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_mobile = (request.data.get("mobile") or "").strip()
+        code = (request.data.get("code") or "").strip()
+        try:
+            mobile = normalize_mobile(raw_mobile)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not code.isdigit() or len(code) != otp_length():
+            return Response(
+                {"detail": "کد تأیید واردشده صحیح نیست."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = verify_code(mobile, code)
+        except OtpVerificationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # django.contrib.auth.login() already rotates the session key for a
+        # fresh anonymous session, which defeats session fixation.
+        login(request, user)
+        return Response(
+            {"detail": "ورود با موفقیت انجام شد.", "next": _safe_next_url(request)},
+            status=status.HTTP_200_OK,
         )
 
 
