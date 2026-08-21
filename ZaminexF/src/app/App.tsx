@@ -69,6 +69,7 @@ type InitialData = {
   currentConsultantId: string | null;
   initialPage: string;
   next: string;
+  loginMethod?: "password" | "sms";
   pageProps?: {
     properties?: Property[];
     property?: Property;
@@ -1639,7 +1640,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
             onDelete={deleteTask}
           />
         );
-      case "my-profile": case "my-profile-edit": case "my-profile-security":
+      case "my-profile": case "my-profile-edit": case "my-profile-security": case "my-profile-login-options":
         return <MyProfilePage page={page} navigate={navigate} userName={userName} role={role} csrfToken={initialData.csrfToken} onProfileUpdated={(newName) => { setUserName(newName); if (role === "admin") { fetchAdminProfile(); } }} districtsList={districtsList} />;
       default: return <div className="p-6"><EmptyState icon={<Layers size={28} />} title="به‌زودی" description="این بخش در حال توسعه است." /></div>;
     }
