@@ -166,7 +166,7 @@ function EditPropertyWizard({
     consultant: "مشاور واگذارشده",
   };
   const requiredForStep = (s: number): string[] => {
-    if (s === 1) return role === "admin" ? ["title", "internalCode", "propertyTypeRef", "consultant"] : ["title", "internalCode", "propertyTypeRef"];
+    if (s === 1) return role === "admin" ? ["title", "propertyTypeRef", "consultant"] : ["title", "propertyTypeRef"];
     if (s === 2) return ["area"];
     if (s === 3) return ["provinceId", "cityId", "districtId", "fullAddress"];
     return [];
@@ -178,16 +178,6 @@ function EditPropertyWizard({
     requiredForStep(s).forEach((k) => {
       if (!String((form as Record<string, any>)[k] ?? "").trim()) errs[k] = requiredFieldMsg(REQUIRED_LABELS[k]);
     });
-    if (s === 1 && !errs.internalCode && form.internalCode.trim()) {
-      const isDup = properties.some(
-        (p) =>
-          String(p.id) !== String(propertyId || "") &&
-          String(p.internalCode || "").trim().toLowerCase() === form.internalCode.trim().toLowerCase()
-      );
-      if (isDup) {
-        errs.internalCode = "این کد داخلی قبلاً برای ملک دیگری ثبت شده است.";
-      }
-    }
     setFieldErrors((prev) => {
       const next = { ...prev };
       requiredForStep(s).forEach((k) => { delete next[k]; });
@@ -316,7 +306,7 @@ function EditPropertyWizard({
             <h2 className="text-base font-semibold mb-1">اطلاعات پایه</h2>
             <Input label="عنوان ملک" value={form.title} onChange={(v) => set("title", v)} error={fieldErrors.title} required />
             <div className="grid grid-cols-2 gap-4">
-              <Input label="کد داخلی" value={form.internalCode} onChange={(v) => set("internalCode", v)} error={fieldErrors.internalCode} required />
+              <Input label="کد داخلی" value={form.internalCode} onChange={() => {}} readOnly error={fieldErrors.internalCode} required />
               <SelectField
                 label="نوع ملک"
                 value={form.propertyTypeRef}

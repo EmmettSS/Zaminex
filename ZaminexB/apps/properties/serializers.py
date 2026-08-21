@@ -84,12 +84,7 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
 
     internalCode = serializers.CharField(
         source="internal_code",
-        validators=[
-            UniqueValidator(
-                queryset=Property.objects.all(),
-                message="این کد داخلی قبلاً برای ملک دیگری ثبت شده است.",
-            )
-        ],
+        read_only=True,
     )
     constructionYear = serializers.IntegerField(source="built_year", required=False, allow_null=True)
     fullAddress = serializers.CharField(source="address", required=False, allow_blank=True)

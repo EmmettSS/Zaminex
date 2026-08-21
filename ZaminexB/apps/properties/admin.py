@@ -9,6 +9,7 @@ class PropertyImageInline(admin.TabularInline):
 
 @admin.register(Property)
 class PropertyAdmin(admin.ModelAdmin):
+    readonly_fields = ("internal_code",)
     list_display = (
         "title",
         "internal_code",
