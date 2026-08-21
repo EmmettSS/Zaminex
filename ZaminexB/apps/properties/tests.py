@@ -230,3 +230,41 @@ class PropertyImageAccessTests(TestCase):
             format="multipart",
         )
         self.assertEqual(resp.status_code, 400, resp.content[:400])
+
+
+class PropertyInternalCodeSequentialTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(username="seq-admin", password="pw", role="ADMIN")
+        self.agent = User.objects.create_user(username="seq-agent", password="pw", role="AGENT")
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+
+    def test_auto_generates_sequential_zf_codes_without_zeros(self):
+        p1 = Property.objects.create(title="ملک اول", consultant=self.agent)
+        self.assertTrue(p1.internal_code.startswith("ZF_"))
+        self.assertNotIn("0", p1.internal_code[3:])
+
+        p2 = Property.objects.create(title="ملک دوم", consultant=self.agent)
+        self.assertTrue(p2.internal_code.startswith("ZF_"))
+        self.assertNotIn("0", p2.internal_code[3:])
+        self.assertNotEqual(p1.internal_code, p2.internal_code)
+
+    def test_api_ignores_passed_internal_code_and_generates_zf(self):
+        resp = self.client.post(
+            "/properties/api/properties/",
+            {
+                "title": "ملک تست ای‌پی‌آی",
+                "internalCode": "MANUAL-OVERRIDE",
+                "type": "APARTMENT",
+                "transactionType": "SALE",
+                "area": 100,
+                "consultant": self.agent.id,
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        created_data = resp.json()
+        self.assertTrue(created_data["internalCode"].startswith("ZF_"))
+        self.assertNotEqual(created_data["internalCode"], "MANUAL-OVERRIDE")
+        self.assertNotIn("0", created_data["internalCode"][3:])
+
