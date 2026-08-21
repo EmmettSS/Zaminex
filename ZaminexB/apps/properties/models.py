@@ -167,13 +167,14 @@ class Property(models.Model):
         return self.title
 
     def save(self, *args, **kwargs):
-        """Mirror the linked district's name into the legacy text column.
-
-        Reports, the market-metrics grouping and the existing search filter all
-        read `neighborhood`. Keeping it in step means the foreign key can be
-        introduced without touching any of them, and a district renamed by an
-        administrator propagates to its properties on their next save.
+        """Mirror the linked district's name into the legacy text column and
+        auto-generate the sequential internal_code for new instances.
         """
+        if self.pk is None:
+            # Auto-generate sequential internal_code for new properties
+            if not self.internal_code or not str(self.internal_code).startswith("ZF_"):
+                self.internal_code = _generate_next_internal_code()
+
         if self.district_id:
             name = self.district.display_name
             if self.neighborhood != name:
@@ -182,6 +183,41 @@ class Property(models.Model):
                 if update_fields is not None and "neighborhood" not in update_fields:
                     kwargs["update_fields"] = list(update_fields) + ["neighborhood"]
         super().save(*args, **kwargs)
+
+
+def _generate_next_internal_code():
+    """Generate the next sequential ZF_XXXX internal code.
+
+    Sequence rules:
+    - Starts at ZF_1111
+    - Only digits 1-9 (no zero allowed anywhere)
+    - Increases sequentially; skips any value containing digit 0
+    - Always globally unique
+    """
+    existing = (
+        Property.objects.filter(internal_code__regex=r"^ZF_[1-9]{4}$")
+        .values_list("internal_code", flat=True)
+    )
+
+    max_val = 1110  # one below starting value
+    for code in existing:
+        try:
+            val = int(str(code)[3:])
+            if val > max_val:
+                max_val = val
+        except (ValueError, IndexError):
+            continue
+
+    next_val = max_val + 1
+    while "0" in str(next_val):
+        next_val += 1
+
+    # Commercial-grade safeguard: expand to 5 digits if 4-digit space is exhausted
+    if next_val > 99999:
+        raise RuntimeError("فضای کدهای داخلی به پایان رسیده است.")
+
+    next_str = f"{next_val:04d}" if next_val <= 9999 else f"{next_val:05d}"
+    return f"ZF_{next_str}"
 
 
 class PropertyAttributeValue(BaseAttributeValue):
