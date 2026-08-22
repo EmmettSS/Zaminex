@@ -21,7 +21,7 @@ import { DistrictCombobox } from "../../../shared/components/ui/DistrictCombobox
 import { apiFetch, readJson, apiErrorMessage, getCsrfToken } from "../../../shared/lib/apiClient";
 import { toast, requiredFieldMsg } from "../../../shared/lib/utils";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis } from "recharts";
-import { Building2, FileText, CheckSquare, BellRing, Users, Activity, Settings, Plus, RefreshCw, Eye, Edit2, Trash2, Archive, Clock, MapPin, Check, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, SlidersHorizontal, ArrowUpRight, LayoutGrid, List, Download, Search, MoreVertical, Phone, Mail, Calendar, TrendingUp, Star, Shield, Lock, Key, Send, Loader2, AlertTriangle, Info, XCircle, CheckCircle2, TriangleAlert, Columns, MessageSquare, Sparkles, GripVertical, Building, History, Flame, Image, Zap, LayoutDashboard, Command, Filter, Award, BarChart3, Layers, User, Upload } from "lucide-react";
+import { Building2, FileText, CheckSquare, BellRing, Users, Activity, Settings, Plus, RefreshCw, Eye, Edit2, Trash2, Archive, Clock, MapPin, Check, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, SlidersHorizontal, ArrowUpRight, LayoutGrid, List, Download, Search, MoreVertical, Phone, Mail, Calendar, TrendingUp, Star, Shield, Lock, Key, Send, Loader2, AlertTriangle, Info, XCircle, CheckCircle2, TriangleAlert, Columns, MessageSquare, Sparkles, GripVertical, Building, History, Flame, Image, Zap, LayoutDashboard, Command, Filter, Award, BarChart3, Layers, User, UserRound, Upload } from "lucide-react";
 import { TRANSACTION_TYPES } from "../../../shared/lib/constants";
 import { DynamicAttributeFields } from "../../../shared/components/ui/DynamicAttributeFields";
 import { LocationSelect, useLocationTree } from "../../../shared/components/ui/LocationSelect";
@@ -55,7 +55,7 @@ function AddPropertyWizard({
   // `price` and `transactionType` are gone: a property is a physical asset, and
   // the money side (price, rent, deposit) is recorded on each listing, since one
   // property can be advertised for sale and for rent at the same time.
-  const [form, setForm] = useState({ title: "", internalCode: "", propertyTypeRef: "", beds: "", area: "", floor: "", constructionYear: "", provinceId: "", cityId: "", districtId: "", latitude: "", longitude: "", fullAddress: "", description: "", consultant: "" });
+  const [form, setForm] = useState({ title: "", internalCode: "", propertyTypeRef: "", beds: "", area: "", floor: "", constructionYear: "", provinceId: "", cityId: "", districtId: "", latitude: "", longitude: "", fullAddress: "", description: "", consultant: "", ownerFirstName: "", ownerLastName: "", ownerPhone: "" });
   const [gallery, setGallery] = useState<File[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -83,6 +83,9 @@ function AddPropertyWizard({
 
   const total = 5;
   const labels = ["اطلاعات پایه", "جزئیات", "موقعیت", "رسانه", "بررسی نهایی"];
+  // Landing page after submit/cancel: admins own the "properties" center,
+  // consultants land back on their "ملک های من" tab.
+  const propertiesPage = role === "admin" ? "properties" : "my-properties";
 
   const REQUIRED_LABELS: Record<string, string> = {
     title: "عنوان ملک",
@@ -94,9 +97,17 @@ function AddPropertyWizard({
     districtId: "محله",
     fullAddress: "آدرس کامل",
     consultant: "واگذار به مشاور",
+    ownerFirstName: "نام مالک",
+    ownerLastName: "نام خانوادگی مالک",
+    ownerPhone: "شماره موبایل مالک",
   };
+  const OWNER_REQUIRED = ["ownerFirstName", "ownerLastName", "ownerPhone"];
   const requiredForStep = (s: number): string[] => {
-    if (s === 1) return role === "admin" ? ["title", "propertyTypeRef", "consultant"] : ["title", "propertyTypeRef"];
+    if (s === 1) {
+      return role === "admin"
+        ? ["title", "propertyTypeRef", "consultant", ...OWNER_REQUIRED]
+        : ["title", "propertyTypeRef", ...OWNER_REQUIRED];
+    }
     if (s === 2) return ["area"];
     if (s === 3) return ["provinceId", "cityId", "districtId", "fullAddress"];
     return [];
@@ -205,6 +216,9 @@ function AddPropertyWizard({
     fullAddress: form.fullAddress,
     description: form.description,
     consultant: form.consultant || null,
+    ownerFirstName: form.ownerFirstName,
+    ownerLastName: form.ownerLastName,
+    ownerPhone: form.ownerPhone,
     attributes,
   });
 
@@ -225,7 +239,7 @@ function AddPropertyWizard({
     }
 
     toast({ type: "success", message: "ملک با موفقیت ثبت شد." });
-    navigate("properties");
+    navigate(propertiesPage);
   };
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -244,7 +258,7 @@ function AddPropertyWizard({
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
-      <div className="flex items-center gap-1.5 mb-6 text-xs text-muted-foreground"><button onClick={() => navigate("properties")} className="hover:text-foreground">املاک</button><ChevronRight size={12} /><span className="text-foreground font-medium">افزودن ملک</span></div>
+      <div className="flex items-center gap-1.5 mb-6 text-xs text-muted-foreground"><button onClick={() => navigate(propertiesPage)} className="hover:text-foreground">املاک</button><ChevronRight size={12} /><span className="text-foreground font-medium">افزودن ملک</span></div>
       <div className="flex items-center gap-0 mb-8">
         {labels.map((label, i) => {
           const n = i + 1; const done = n < step; const active = n === step;
@@ -296,6 +310,20 @@ function AddPropertyWizard({
               />
             }
             {role === "consultant" && <div className="p-3 bg-primary/5 border border-primary/20 rounded-xl flex items-center gap-2 text-xs text-primary"><User size={13} />این ملک به‌طور خودکار به شما واگذار می‌شود.</div>}
+
+            <div className="pt-2 border-t border-border">
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
+                <UserRound size={14} />
+                اطلاعات مالک
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <Input label="نام مالک" placeholder="مثال: علی" value={form.ownerFirstName} onChange={(v) => set("ownerFirstName", v)} error={fieldErrors.ownerFirstName} required />
+                <Input label="نام خانوادگی مالک" placeholder="مثال: رضایی" value={form.ownerLastName} onChange={(v) => set("ownerLastName", v)} error={fieldErrors.ownerLastName} required />
+              </div>
+              <div className="mt-4">
+                <Input label="شماره موبایل مالک" type="tel" placeholder="مثال: 09121234567" value={form.ownerPhone} onChange={(v) => set("ownerPhone", v)} error={fieldErrors.ownerPhone} required />
+              </div>
+            </div>
           </div>
         )}
         {step === 2 && (
@@ -385,6 +413,9 @@ function AddPropertyWizard({
                 ["سال ساخت", form.constructionYear || "—"],
                 ["محله", selectedDistrictLabel],
                 ["آدرس کامل", form.fullAddress || "—"],
+                ["نام مالک", form.ownerFirstName || "—"],
+                ["نام خانوادگی مالک", form.ownerLastName || "—"],
+                ["شماره موبایل مالک", form.ownerPhone || "—"],
                 ...reviewAttributeRows,
                 ["تصاویر", `${gallery.length} فایل`],
               ].map(([k, v]) => (
@@ -401,7 +432,7 @@ function AddPropertyWizard({
       ) : null}
 
       <div className="flex justify-between mt-4">
-        <Btn variant="secondary" onClick={() => step > 1 ? setStep(step - 1) : navigate("properties")}><ChevronRight size={14} />{step > 1 ? "قبلی" : "انصراف"}</Btn>
+        <Btn variant="secondary" onClick={() => step > 1 ? setStep(step - 1) : navigate(propertiesPage)}><ChevronRight size={14} />{step > 1 ? "قبلی" : "انصراف"}</Btn>
         {step < total ? <Btn variant="primary" onClick={goNextStep}>ادامه <ChevronLeft size={14} /></Btn> : <Btn variant="primary" onClick={handleCreateSubmit} disabled={isSubmitting}><Check size={14} />{isSubmitting ? "در حال ذخیره…" : "ثبت ملک"}</Btn>}
       </div>
     </div>

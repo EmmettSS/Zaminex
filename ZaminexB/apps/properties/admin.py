@@ -14,6 +14,9 @@ class PropertyAdmin(admin.ModelAdmin):
         "title",
         "internal_code",
         "consultant",
+        "owner_first_name",
+        "owner_last_name",
+        "owner_phone",
         "property_type",
         "deal_type",
         "price",
@@ -31,6 +34,9 @@ class PropertyAdmin(admin.ModelAdmin):
         "internal_code",
         "address",
         "neighborhood",
+        "owner_first_name",
+        "owner_last_name",
+        "owner_phone",
         "consultant__username",
     )
     ordering = ("-created_at",)

@@ -26,7 +26,7 @@ import { PropertyMapPicker } from "../../../shared/components/ui/PropertyMapPick
 import { useBasicsCatalog, useAttributeSchema } from "../../../shared/lib/useAttributeSchema";
 import { formatJalali } from "../../../shared/lib/jdate";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis } from "recharts";
-import { Building2, FileText, CheckSquare, BellRing, Users, Activity, Settings, Plus, RefreshCw, Eye, Edit2, Trash2, Archive, Clock, MapPin, Check, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, SlidersHorizontal, ArrowUpRight, LayoutGrid, List, Download, Search, MoreVertical, Phone, Mail, Calendar, TrendingUp, Star, Shield, Lock, Key, Send, Loader2, AlertTriangle, Info, XCircle, CheckCircle2, TriangleAlert, Columns, MessageSquare, Sparkles, GripVertical, Building, History, Flame, Image, Zap, LayoutDashboard, Command, Filter, Award, BarChart3, Layers } from "lucide-react";
+import { Building2, FileText, CheckSquare, BellRing, Users, Activity, Settings, Plus, RefreshCw, Eye, Edit2, Trash2, Archive, Clock, MapPin, Check, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, SlidersHorizontal, ArrowUpRight, LayoutGrid, List, Download, Search, MoreVertical, Phone, Mail, Calendar, TrendingUp, Star, Shield, Lock, Key, Send, Loader2, AlertTriangle, Info, XCircle, CheckCircle2, TriangleAlert, Columns, MessageSquare, Sparkles, GripVertical, Building, History, Flame, Image, Zap, LayoutDashboard, Command, Filter, Award, BarChart3, Layers, UserRound } from "lucide-react";
 import { TRANSACTION_TYPES } from "../../../shared/lib/constants";
 function EditPropertyWizard({
   navigate,
@@ -71,6 +71,9 @@ function EditPropertyWizard({
     fullAddress: existing?.fullAddress || "",
     description: existing?.description || "",
     consultant: existing?.consultantId || "",
+    ownerFirstName: existing?.ownerFirstName || "",
+    ownerLastName: existing?.ownerLastName || "",
+    ownerPhone: existing?.ownerPhone || "",
   });
   const total = 4;
   const labels = ["اطلاعات پایه", "جزئیات", "موقعیت", "بررسی"];
@@ -230,6 +233,9 @@ function EditPropertyWizard({
       fullAddress: existing.fullAddress || "",
       description: existing.description || "",
       consultant: existing.consultantId || "",
+      ownerFirstName: existing.ownerFirstName || "",
+      ownerLastName: existing.ownerLastName || "",
+      ownerPhone: existing.ownerPhone || "",
     });
   }, [existing]);
 
@@ -247,6 +253,9 @@ function EditPropertyWizard({
     fullAddress: form.fullAddress,
     description: form.description,
     consultant: form.consultant || undefined,
+    ownerFirstName: form.ownerFirstName,
+    ownerLastName: form.ownerLastName,
+    ownerPhone: form.ownerPhone,
     attributes: Object.fromEntries(Object.entries(attributes).filter(([k]) => schemaNames.has(k))),
   });
 
@@ -329,6 +338,20 @@ function EditPropertyWizard({
               <p className="text-xs text-blue-700">قیمت و نوع معامله در آگهی‌های این ملک ثبت می‌شوند.</p>
             </div>
             {role === "admin" && <ConsultantCombobox label="مشاور واگذارشده" value={String(form.consultant ?? "")} onChange={(v) => set("consultant", v)} error={fieldErrors.consultant} required consultants={consultants}/>}
+
+            <div className="pt-2 border-t border-border">
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
+                <UserRound size={14} />
+                اطلاعات مالک
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <Input label="نام مالک" value={form.ownerFirstName} onChange={(v) => set("ownerFirstName", v)} />
+                <Input label="نام خانوادگی مالک" value={form.ownerLastName} onChange={(v) => set("ownerLastName", v)} />
+              </div>
+              <div className="mt-4">
+                <Input label="شماره موبایل مالک" type="tel" value={form.ownerPhone} onChange={(v) => set("ownerPhone", v)} />
+              </div>
+            </div>
           </div>
         )}
         {step === 2 && (
@@ -377,7 +400,7 @@ function EditPropertyWizard({
           <div className="space-y-4">
             <h2 className="text-base font-semibold mb-1">بررسی تغییرات</h2>
             <div className="rounded-xl bg-secondary p-4 space-y-3">
-              {[["عنوان", form.title], ["کد", form.internalCode], ["نوع", selectedType?.displayName || "—"], ["کاربری", selectedUsageLabel], ["مساحت", form.area], ["طبقه", form.floor], ["سال ساخت", form.constructionYear], ["محله", selectedDistrictLabel], ...reviewAttributeRows].map(([k, v]) => (
+              {[["عنوان", form.title], ["کد", form.internalCode], ["نوع", selectedType?.displayName || "—"], ["کاربری", selectedUsageLabel], ["مساحت", form.area], ["طبقه", form.floor], ["سال ساخت", form.constructionYear], ["محله", selectedDistrictLabel], ["نام مالک", form.ownerFirstName || "—"], ["نام خانوادگی مالک", form.ownerLastName || "—"], ["شماره موبایل مالک", form.ownerPhone || "—"], ...reviewAttributeRows].map(([k, v]) => (
                 <div key={k} className="flex justify-between py-1.5 border-b border-border/50 last:border-0">
                   <span className="text-sm text-muted-foreground">{k}</span><span className="text-sm font-semibold max-w-xs truncate">{v}</span>
                 </div>

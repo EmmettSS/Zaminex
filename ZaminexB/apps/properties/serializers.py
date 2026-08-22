@@ -119,6 +119,18 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
     )
     isShared = serializers.BooleanField(source="is_shared", required=False)
 
+    # Owner contact. Optional on the wire for edit/backfill, but the `validate`
+    # hook below makes all three mandatory when a new property is created.
+    ownerFirstName = serializers.CharField(
+        source="owner_first_name", required=False, allow_blank=True
+    )
+    ownerLastName = serializers.CharField(
+        source="owner_last_name", required=False, allow_blank=True
+    )
+    ownerPhone = serializers.CharField(
+        source="owner_phone", required=False, allow_blank=True
+    )
+
     type = serializers.ChoiceField(
         choices=Property.PropertyType.choices,
         source="property_type",
@@ -166,6 +178,7 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
             "locationPath", "latitude", "longitude",
             "attributes", "attributeDetails",
             "isShared",
+            "ownerFirstName", "ownerLastName", "ownerPhone",
         ]
 
     def get_price(self, obj):
@@ -234,6 +247,21 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
     def validate(self, attrs):
         if "rooms" in attrs and attrs["rooms"] is None:
             attrs["rooms"] = 0
+
+        # Owner contact is mandatory when creating a property. It is not forced
+        # on updates so existing rows and partial edits (which may predate the
+        # field) can still be saved; the front-end form prompts for it.
+        if self.instance is None:
+            missing = {}
+            for field, label in (
+                ("owner_first_name", "نام مالک"),
+                ("owner_last_name", "نام خانوادگی مالک"),
+                ("owner_phone", "شماره موبایل مالک"),
+            ):
+                if not str(attrs.get(field, "") or "").strip():
+                    missing[field] = f"{label} الزامی است."
+            if missing:
+                raise serializers.ValidationError(missing)
 
         # Consultants cannot change the consultant field on shared properties.
         request = self.context.get("request")

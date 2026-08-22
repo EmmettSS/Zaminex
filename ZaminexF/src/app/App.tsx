@@ -37,7 +37,7 @@ import { EditConsultantPage } from "../features/consultants/components/EditConsu
 import { FollowUpsPage } from "../features/followups/pages/FollowUpsPage";
 import { CreateFollowUp } from "../features/followups/components/CreateFollowUp";
 import { MyProfilePage } from "../features/profile/pages/MyProfilePage";
-import { MyPropertiesPage } from "../features/properties/pages/MyPropertiesPage";
+import { MyPropertiesPage, AllPropertiesPage } from "../features/properties/pages/MyPropertiesPage";
 import { MyTasksPage } from "../features/tasks/pages/MyTasksPage";
 import { DistrictsPage } from "../features/districts/pages/DistrictsPage";
 import { AttributesPage } from "../features/attributes/pages/AttributesPage";
@@ -120,6 +120,10 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     initialData.pageProps?.properties || initialData.pageProps?.items || []);
   const [propertiesLoading, setPropertiesLoading] = useState(false);
   const [propertiesError, setPropertiesError] = useState<string | null>(null);
+  // All properties across the whole system, used only by the consultant
+  // "همه املاک" tab (fetched via scope=all). Kept separate from `properties`,
+  // which stays scoped to the current consultant (own + shared) everywhere else.
+  const [allProperties, setAllProperties] = useState<Property[]>([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [selectedProperty, setSelectedProperty] = useState<Property | undefined>(
     initialData.pageProps?.property
@@ -885,7 +889,29 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     if (page !== "properties" && page !== "my-properties" && page !== "add-property" && page !== "edit-property" && page !== "create-followup" && page !== "edit-followup" && page !== "follow-ups") return;
     fetchProperties();
   }, [page, fetchProperties]);
-  
+
+  // The consultant "همه املاک" tab needs every property in the system, which
+  // the scoped `properties` fetch never returns. Load it only when that tab is
+  // open so consultants keep a fast, role-scoped list everywhere else.
+  const fetchAllProperties = useCallback(async () => {
+    try {
+      const res = await apiFetch(
+        "/properties/api/properties/?scope=all&page_size=1000",
+        { method: "GET" },
+        initialData.csrfToken
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      setAllProperties(Array.isArray(data) ? data : (data.results ?? []));
+    } catch (error) {
+      console.error("Error fetching all properties:", error);
+    }
+  }, [initialData.csrfToken]);
+
+  useEffect(() => {
+    if (page === "all-properties") fetchAllProperties();
+  }, [page, fetchAllProperties]);
+
   useEffect(() => {
     const wantedId = page === "edit-property"
       ? (editingPropertyId || selectedPropertyId)
@@ -897,7 +923,11 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     const controller = new AbortController();
     async function loadDetail() {
       try {
-        const res = await apiFetch(`/properties/api/properties/${wantedId}/`, { method: "GET", signal: controller.signal }, initialData.csrfToken);
+        // scope=all lets a consultant open the detail of any property in the
+        // system (view-only); mutating actions still resolve through the
+        // restricted queryset on the server.
+        const scope = role === "consultant" ? "?scope=all" : "";
+        const res = await apiFetch(`/properties/api/properties/${wantedId}/${scope}`, { method: "GET", signal: controller.signal }, initialData.csrfToken);
         if (res.ok) {
           const data = await res.json();
           setSelectedProperty(data);
@@ -1621,6 +1651,19 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
           <MyPropertiesPage
             navigate={navigate}
             properties={properties}
+            consultantId={currentConsultantId}
+            openPropertyDetail={openPropertyDetail}
+            openPropertyEdit={openPropertyEdit}
+            onArchive={archiveProperty}
+            csrfToken={initialData.csrfToken}
+            userName={userName}
+          />
+        );
+      case "all-properties":
+        return (
+          <AllPropertiesPage
+            navigate={navigate}
+            properties={allProperties}
             consultantId={currentConsultantId}
             openPropertyDetail={openPropertyDetail}
             openPropertyEdit={openPropertyEdit}

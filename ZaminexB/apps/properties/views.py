@@ -61,7 +61,15 @@ class PropertyViewSet(viewsets.ModelViewSet):
             )
         )
 
-        if django_role != "ADMIN":
+        # Read-only access to *every* property in the system for the consultant
+        # "همه املاک" tab. Only honoured for GET requests so a consultant can
+        # browse/view details of any property but update/destroy/image actions
+        # still resolve through the restricted queryset below (owner/shared only).
+        scope_all = (
+            self.request.method == "GET"
+            and self.request.query_params.get("scope") == "all"
+        )
+        if django_role != "ADMIN" and not scope_all:
             qs = qs.filter(Q(consultant=user) | Q(is_shared=True))
 
         search_query = self.request.query_params.get("q")
@@ -413,6 +421,9 @@ def property_list(request):
             "consultant": (p.consultant.get_full_name() or p.consultant.username) if p.consultant else "نامشخص",
             "consultantId": str(p.consultant.id) if p.consultant else "",
             "date": p.created_at.strftime("%Y-%m-%d") if p.created_at else "",
+            "ownerFirstName": p.owner_first_name or "",
+            "ownerLastName": p.owner_last_name or "",
+            "ownerPhone": p.owner_phone or "",
             "views": 0,
             "listed": not is_archived,
             "roi": 0,
@@ -536,11 +547,11 @@ def property_detail(request, pk):
             pk=pk
         )
     else:
-        from django.db.models import Q
+        # Read access to every property (the "همه املاک" tab). Mutating actions
+        # (archive, image management) still go through their own owner-only views.
         property_obj = get_object_or_404(
             Property.objects.prefetch_related("images"),
-            Q(pk=pk),
-            Q(consultant=user) | Q(is_shared=True),
+            pk=pk,
         )
 
     property_data = {
@@ -564,6 +575,9 @@ def property_detail(request, pk):
         ),
         "consultantId": str(property_obj.consultant.id) if property_obj.consultant else "",
         "date": property_obj.created_at.strftime("%Y-%m-%d") if property_obj.created_at else "",
+        "ownerFirstName": property_obj.owner_first_name or "",
+        "ownerLastName": property_obj.owner_last_name or "",
+        "ownerPhone": property_obj.owner_phone or "",
         "views": 0,
         "listed": property_obj.status != Property.Status.INACTIVE,
         "roi": 0,
