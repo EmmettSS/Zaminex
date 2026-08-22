@@ -280,7 +280,7 @@ function AddPropertyWizard({
             <h2 className="text-base font-semibold mb-1">اطلاعات پایه</h2>
             <Input label="عنوان ملک" placeholder="مثال: برج مسکونی نیاوران - واحد ۱۲۰۴" value={form.title} onChange={(v) => set("title", v)} error={fieldErrors.title} required />
             <div className="grid grid-cols-2 gap-4">
-              <Input label="کد داخلی" placeholder="مثال: ZX-1204-NY" value={form.internalCode} onChange={() => {}} readOnly error={fieldErrors.internalCode} required />
+              <Input label="کد داخلی" placeholder="تولید خودکار پس از ثبت (ZF_XXXX)" value={form.internalCode} onChange={() => {}} readOnly error={fieldErrors.internalCode} />
               <SelectField
                 label="نوع ملک"
                 value={form.propertyTypeRef}

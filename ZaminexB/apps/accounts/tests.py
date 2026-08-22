@@ -604,3 +604,221 @@ class LogoutFlowTests(TestCase):
             {"csrfmiddlewaretoken": "x" * 32},
         )
         self.assertEqual(res.status_code, 403)
+
+
+# =============================================================================
+#  SMS OTP login (اصلاحیه دوم): request/verify flow, fallback, method switch
+# =============================================================================
+
+from datetime import timedelta
+from unittest import mock
+
+from django.core.cache import cache
+
+from apps.accounts import sms
+from apps.accounts.forms import (
+    SMS_LOGIN_REQUIRED_MESSAGE,
+    ZaminexAdminAuthenticationForm,
+)
+from apps.accounts.models import (
+    LoginMethod,
+    LoginSettings,
+    SmsLoginCode,
+    SmsProviderSettings,
+)
+from apps.accounts.sms import (
+    SmsSendError,
+    normalize_mobile,
+    set_login_method,
+)
+
+
+class MobileNormalizationTests(TestCase):
+    def test_accepts_standard_forms(self):
+        self.assertEqual(normalize_mobile("09123456789"), "09123456789")
+        self.assertEqual(normalize_mobile("+989123456789"), "09123456789")
+        self.assertEqual(normalize_mobile("989123456789"), "09123456789")
+        self.assertEqual(normalize_mobile("9123456789"), "09123456789")
+
+    def test_rejects_invalid(self):
+        for bad in ("123", "08123456789", "0912345678", "", None, "abcdefghijk"):
+            with self.assertRaises(ValueError):
+                normalize_mobile(bad)
+
+
+class SmsLoginFlowTests(TestCase):
+    def setUp(self):
+        # Throttle history lives in the shared locmem cache across tests;
+        # reset it so one test's requests never throttle the next one.
+        cache.clear()
+
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username="smsagent", password="agentpass123", role=UserRole.AGENT
+        )
+        self.profile = ConsultantProfile.objects.create(
+            user=self.user,
+            full_name="Sms Agent",
+            mobile="09123456789",
+            branch="شعبه مرکزی",
+            is_active=True,
+        )
+        set_login_method(LoginMethod.SMS)
+
+        # The view binds `send_verification_code` into its own namespace
+        # (from-import), so patch where it is *used*, not where it is defined.
+        patcher_send = mock.patch("apps.accounts.views.send_verification_code")
+        patcher_gen = mock.patch("apps.accounts.sms._generate_code", return_value="123456")
+        self.mock_send = patcher_send.start()
+        self.mock_gen = patcher_gen.start()
+        self.addCleanup(patcher_send.stop)
+        self.addCleanup(patcher_gen.stop)
+        self.addCleanup(lambda: set_login_method(LoginMethod.PASSWORD))
+
+    def _request(self, mobile="09123456789"):
+        return self.client.post("/accounts/sms-login/request/", {"mobile": mobile}, format="json")
+
+    def _verify(self, code="123456", mobile="09123456789"):
+        return self.client.post(
+            "/accounts/sms-login/verify/", {"mobile": mobile, "code": code}, format="json"
+        )
+
+    def test_request_code_sends_sms(self):
+        res = self._request()
+        self.assertEqual(res.status_code, 200)
+        self.mock_send.assert_called_once_with("09123456789", "123456")
+        self.assertTrue(SmsLoginCode.objects.filter(mobile="09123456789").exists())
+
+    def test_request_code_normalizes_mobile(self):
+        res = self._request(mobile="+989123456789")
+        self.assertEqual(res.status_code, 200)
+        self.mock_send.assert_called_once_with("09123456789", "123456")
+
+    def test_request_code_unknown_mobile_is_generic(self):
+        res = self._request(mobile="09999999999")
+        self.assertEqual(res.status_code, 200)
+        self.mock_send.assert_not_called()
+
+    def test_request_code_invalid_mobile(self):
+        res = self._request(mobile="123")
+        self.assertEqual(res.status_code, 400)
+
+    def test_request_code_disabled_when_password_active(self):
+        set_login_method(LoginMethod.PASSWORD)
+        res = self._request()
+        self.assertEqual(res.status_code, 400)
+
+    def test_resend_cooldown(self):
+        self.assertEqual(self._request().status_code, 200)
+        self.assertEqual(self._request().status_code, 429)
+
+    def test_verify_correct_code_logs_in(self):
+        self._request()
+        res = self._verify()
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.client.session.get("_auth_user_id"), str(self.user.id))
+        code = SmsLoginCode.objects.get(mobile="09123456789")
+        self.assertIsNotNone(code.consumed_at)
+
+    def test_verify_wrong_code(self):
+        self._request()
+        res = self._verify(code="000000")
+        self.assertEqual(res.status_code, 400)
+        code = SmsLoginCode.objects.get(mobile="09123456789")
+        self.assertEqual(code.attempts, 1)
+
+    def test_verify_too_many_attempts_invalidates_code(self):
+        self._request()
+        for _ in range(sms.otp_max_attempts()):
+            self._verify(code="000000")
+        res = self._verify(code="123456")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("باطل", res.data["detail"])
+
+    def test_verify_expired_code(self):
+        self._request()
+        code = SmsLoginCode.objects.get(mobile="09123456789")
+        code.expires_at = timezone.now() - timedelta(seconds=1)
+        code.save(update_fields=["expires_at"])
+        res = self._verify()
+        self.assertEqual(res.status_code, 400)
+
+    def test_archived_consultant_cannot_verify(self):
+        self.profile.is_active = False
+        self.profile.save()
+        sms.issue_code("09123456789")
+        res = self._verify()
+        self.assertEqual(res.status_code, 400)
+        self.assertIn(INACTIVE_ACCOUNT_MESSAGE, res.data["detail"])
+
+
+class SmsProviderFallbackTests(TestCase):
+    def setUp(self):
+        config = SmsProviderSettings.get_solo()
+        config.smsir_api_key = "smsir-key"
+        config.smsir_template_id = "12345"
+        config.kavenegar_api_key = "kave-key"
+        config.kavenegar_sender = "20006535"
+        config.kavenegar_message = "code: {code}"
+        config.save()
+
+    def test_kavenegar_used_when_smsir_fails(self):
+        with mock.patch("apps.accounts.sms._smsir_send", side_effect=SmsSendError("down")), \
+                mock.patch("apps.accounts.sms._kavenegar_send") as kave:
+            sms.send_verification_code("09123456789", "123456")
+            kave.assert_called_once()
+
+    def test_error_when_both_providers_fail(self):
+        with mock.patch("apps.accounts.sms._smsir_send", side_effect=SmsSendError("down")), \
+                mock.patch("apps.accounts.sms._kavenegar_send", side_effect=SmsSendError("down")):
+            with self.assertRaises(SmsSendError):
+                sms.send_verification_code("09123456789", "123456")
+
+
+class LoginMethodEnforcementTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        # The admin login form requires is_staff in addition to the ADMIN
+        # role, so the fixture must be staff (create_user alone is not).
+        self.user = User.objects.create_user(
+            username="switcher",
+            password="adminpass123",
+            role=UserRole.ADMIN,
+            is_staff=True,
+        )
+        AdminProfile.objects.create(user=self.user, full_name="Switcher", branch="شعبه مرکزی")
+        self.addCleanup(lambda: set_login_method(LoginMethod.PASSWORD))
+
+    def test_password_login_blocked_when_sms_active(self):
+        set_login_method(LoginMethod.SMS)
+        res = Client().post(
+            "/accounts/login/", {"username": "switcher", "password": "adminpass123"}
+        )
+        self.assertEqual(res.status_code, 200)
+        errors = extract_login_errors(res.content.decode("utf-8"))
+        self.assertIn(SMS_LOGIN_REQUIRED_MESSAGE, errors.get("__all__", []))
+
+    def test_admin_form_still_allows_password_when_sms_active(self):
+        set_login_method(LoginMethod.SMS)
+        form = ZaminexAdminAuthenticationForm(
+            data={"username": "switcher", "password": "adminpass123"}
+        )
+        self.assertTrue(form.is_valid())
+
+    def test_login_options_endpoint_admin_only(self):
+        agent = User.objects.create_user(
+            username="agentx", password="agentpass123", role=UserRole.AGENT
+        )
+        client = APIClient()
+        client.force_authenticate(user=agent)
+        res = client.patch("/accounts/login-options/", {"method": "sms"}, format="json")
+        self.assertEqual(res.status_code, 403)
+
+    def test_login_options_roundtrip(self):
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        res = client.patch("/accounts/login-options/", {"method": "sms"}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(LoginSettings.get_solo().method, LoginMethod.SMS)
+        res = client.get("/accounts/login-options/")
+        self.assertEqual(res.data["method"], LoginMethod.SMS)

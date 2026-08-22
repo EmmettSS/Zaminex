@@ -49,35 +49,41 @@ class PropertyWizardPayloadTests(TestCase):
             "district": "مرکزی",
             "fullAddress": "تهران",
             "consultant": self.agent.pk,
+            "ownerFirstName": "صمد",
+            "ownerLastName": "تست",
+            "ownerPhone": "09120000001",
         }
         payload.update(overrides)
         return payload
 
-    def test_a_property_is_created_without_a_price(self):
-        """Price moved to the listing, so it must no longer be required."""
+    def _create(self, **overrides):
+        """POST a wizard payload and return the created Property.
+
+        The API ignores any passed internalCode and generates a sequential
+        ZF_ code, so the record is looked up by the id in the response.
+        """
         response = self.client.post(
-            "/properties/api/properties/", self._payload(), content_type="application/json"
+            "/properties/api/properties/",
+            self._payload(**overrides),
+            content_type="application/json",
         )
         self.assertEqual(response.status_code, 201, response.content[:400])
+        return Property.objects.get(pk=response.json()["id"])
 
-        prop = Property.objects.get(internal_code="WIZ-1")
+    def test_a_property_is_created_without_a_price(self):
+        """Price moved to the listing, so it must no longer be required."""
+        prop = self._create()
         self.assertIsNone(prop.price)
 
     def test_the_legacy_type_column_is_kept_in_sync(self):
         """Existing readers still use `property_type`, so it must stay correct."""
-        self.client.post(
-            "/properties/api/properties/", self._payload(), content_type="application/json"
-        )
-        prop = Property.objects.get(internal_code="WIZ-1")
+        prop = self._create()
 
         self.assertEqual(prop.property_type_ref, self.apartment)
         self.assertEqual(prop.property_type, "APARTMENT")
 
     def test_the_usage_is_derived_from_the_type(self):
-        self.client.post(
-            "/properties/api/properties/", self._payload(), content_type="application/json"
-        )
-        prop = Property.objects.get(internal_code="WIZ-1")
+        prop = self._create()
         self.assertEqual(prop.property_usage.name, "residential")
 
     def test_custom_fields_are_stored_and_returned(self):
@@ -122,12 +128,7 @@ class PropertyWizardPayloadTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_updating_replaces_a_value_and_clears_another(self):
-        self.client.post(
-            "/properties/api/properties/",
-            self._payload(attributes={"total_floors": 10, "parking": True}),
-            content_type="application/json",
-        )
-        prop = Property.objects.get(internal_code="WIZ-1")
+        prop = self._create(attributes={"total_floors": 10, "parking": True})
 
         response = self.client.patch(
             f"/properties/api/properties/{prop.pk}/",

@@ -16,7 +16,7 @@ type Page =
   | "activity"
   | "settings-workspace" | "settings-users" | "settings-permissions" | "manage-districts" | "districts" | "manage-attributes"
   | "consultant-dashboard" | "my-properties" | "all-properties" | "my-listings" | "my-tasks" | "my-followups"
-  | "my-profile" | "my-profile-edit" | "my-profile-security";
+  | "my-profile" | "my-profile-edit" | "my-profile-security" | "my-profile-login-options";
 
 interface TaskHistoryEntry { id: string; action: string; from?: string; to?: string; note?: string; user: string; time: string; }
 

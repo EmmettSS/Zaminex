@@ -286,6 +286,9 @@ class PropertyLocationAPITests(TestCase):
                 "districtId": self.district.pk,
                 "fullAddress": "ساری",
                 "consultant": self.agent.pk,
+                "ownerFirstName": "صمد",
+                "ownerLastName": "لوکیشن",
+                "ownerPhone": "09120000001",
             },
             content_type="application/json",
         )
@@ -312,6 +315,9 @@ class PropertyLocationAPITests(TestCase):
                 "district": "محله آزاد",
                 "fullAddress": "ساری",
                 "consultant": self.agent.pk,
+                "ownerFirstName": "صمد",
+                "ownerLastName": "لوکیشن",
+                "ownerPhone": "09120000001",
             },
             content_type="application/json",
         )
@@ -330,6 +336,9 @@ class PropertyLocationAPITests(TestCase):
                 "districtId": self.district.pk,
                 "fullAddress": "ساری",
                 "consultant": self.agent.pk,
+                "ownerFirstName": "صمد",
+                "ownerLastName": "لوکیشن",
+                "ownerPhone": "09120000001",
             },
             content_type="application/json",
         )

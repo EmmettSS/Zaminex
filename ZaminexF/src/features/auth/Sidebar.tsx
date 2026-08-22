@@ -22,7 +22,7 @@ function Sidebar({ role, page, navigate, collapsed, setCollapsed, userName, user
     { heading: "افراد", items: [{ label: "مشاوران", icon: <Users size={16} />, children: [{ label: "فهرست", page: "consultants" }, { label: "افزودن مشاور", page: "add-consultant" }] }] },
     { heading: "هوش کسب‌وکار", items: [{ label: "گزارش فعالیت", icon: <Activity size={16} />, page: "activity" }] },
     { heading: "اطلاعات پایه", items: [{ label: "مدیریت مناطق", icon: <MapPin size={16} />, page: "manage-districts" }, { label: "مدیریت ویژگی‌ها", icon: <SlidersHorizontal size={16} />, page: "manage-attributes" }] },
-    { heading: "پروفایل", items: [{ label: "پروفایل من", icon: <User size={16} />, children: [{ label: "نمای کلی", page: "my-profile" }, { label: "ویرایش پروفایل", page: "my-profile-edit" }, { label: "امنیت", page: "my-profile-security" }] }] },
+    { heading: "پروفایل", items: [{ label: "پروفایل من", icon: <User size={16} />, children: [{ label: "نمای کلی", page: "my-profile" }, { label: "ویرایش پروفایل", page: "my-profile-edit" }, { label: "امنیت", page: "my-profile-security" }, { label: "گزینه‌های ورود", page: "my-profile-login-options" }] }] },
   ];
   const consultantSections: NavSection[] = [
     { items: [{ label: "داشبورد", icon: <LayoutDashboard size={16} />, page: "consultant-dashboard" }, { label: "املاک", icon: <Building2 size={16} />, children: [{ label: "ملک های من", page: "my-properties" }, { label: "همه املاک", page: "all-properties" }, { label: "افزودن", page: "add-property" }] }, { label: "آگهی‌های من", icon: <FileText size={16} />, page: "my-listings" }] },

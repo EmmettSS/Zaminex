@@ -186,7 +186,7 @@ class Property(models.Model):
         """
         if self.pk is None:
             # Auto-generate sequential internal_code for new properties
-            if not self.internal_code or not str(self.internal_code).startswith("ZF_"):
+            if not self.internal_code:
                 self.internal_code = _generate_next_internal_code()
 
         if self.district_id:
@@ -209,7 +209,7 @@ def _generate_next_internal_code():
     - Always globally unique
     """
     existing = (
-        Property.objects.filter(internal_code__regex=r"^ZF_[1-9]{4}$")
+        Property.objects.filter(internal_code__regex=r"^ZF_[1-9]+$")
         .values_list("internal_code", flat=True)
     )
 
@@ -231,6 +231,12 @@ def _generate_next_internal_code():
         raise RuntimeError("فضای کدهای داخلی به پایان رسیده است.")
 
     next_str = f"{next_val:04d}" if next_val <= 9999 else f"{next_val:05d}"
+    while Property.objects.filter(internal_code=f"ZF_{next_str}").exists():
+        next_val += 1
+        while "0" in str(next_val):
+            next_val += 1
+        next_str = f"{next_val:04d}" if next_val <= 9999 else f"{next_val:05d}"
+
     return f"ZF_{next_str}"
 
 

@@ -236,6 +236,18 @@ LOGIN_FAILURE_LIMIT = 5
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 10 * 60
 
+# ---------------------------------------------------------------------------
+# SMS OTP login
+# ---------------------------------------------------------------------------
+# One-time codes for «ورود با کد پیامکی». All values are read through
+# apps.accounts.sms helpers, which fall back to these defaults when a setting
+# is missing, so deployments can override them without touching code.
+SMS_OTP_LENGTH = 6
+SMS_OTP_TTL_SECONDS = 2 * 60
+SMS_OTP_MAX_ATTEMPTS = 5
+SMS_OTP_RESEND_COOLDOWN_SECONDS = 60
+SMS_REQUEST_TIMEOUT = 10
+
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
@@ -274,6 +286,10 @@ REST_FRAMEWORK = {
         "ai": "10/hour",
         "export": "10/hour",
         "file_upload": "20/min",
+        # SMS OTP login: sending codes costs real SMS credit and verification
+        # is a brute-force surface, so both are throttled per client IP.
+        "sms_request": "10/hour",
+        "sms_verify": "20/min",
     },
 }
 
@@ -351,4 +367,37 @@ def _with_host_origins(configured: list[str], hosts: list[str]) -> list[str]:
     return origins
 
 
-CSRF_TRUSTED_ORIGINS = _with_host_origins(CSRF_TRUSTED_ORIGINS, ALLOWED_HOSTS)
+class _HostSyncedOrigins(list):
+    """``CSRF_TRUSTED_ORIGINS`` that keeps tracking ``ALLOWED_HOSTS``.
+
+    ``ALLOWED_HOSTS`` can be extended *after* this module is imported —
+    Django's test runner adds ``testserver``, and reloads change hosts at
+    runtime. A list frozen at import time would then miss those entries, so
+    every access re-derives the host origins from the current setting while
+    the operator-configured origins (env var) are kept verbatim.
+    """
+
+    def __init__(self, configured: list[str]):
+        super().__init__(configured)
+        self._configured = tuple(configured)
+
+    def _derived(self) -> list[str]:
+        from django.conf import settings as _live_settings
+
+        hosts = list(getattr(_live_settings, "ALLOWED_HOSTS", ALLOWED_HOSTS) or [])
+        return _with_host_origins(list(self._configured), hosts)
+
+    def __iter__(self):
+        return iter(self._derived())
+
+    def __contains__(self, item):
+        return item in self._derived()
+
+    def __getitem__(self, item):
+        return self._derived()[item]
+
+    def __len__(self):
+        return len(self._derived())
+
+
+CSRF_TRUSTED_ORIGINS = _HostSyncedOrigins(CSRF_TRUSTED_ORIGINS)
