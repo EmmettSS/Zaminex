@@ -2,6 +2,11 @@ from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.common.date_filters import (
+    apply_datetime_field_range,
+    parse_gregorian_date,
+    validate_date_range,
+)
 from apps.common.pagination import LargeListPagination
 
 from .models import FollowUp, FollowUpStatus
@@ -69,6 +74,24 @@ class FollowUpViewSet(viewsets.ModelViewSet):
 
         if type_value:
             queryset = queryset.filter(follow_up_type=type_value)
+
+        # Inclusive scheduled-date range. The UI sends Gregorian YYYY-MM-DD
+        # (already converted from Jalali); each endpoint is interpreted as a
+        # whole Asia/Tehran calendar day so records in the first hours after
+        # Tehran midnight are matched correctly, regardless of the server's
+        # UTC timezone. ``scheduled_at`` already has a single-column index.
+        scheduled_from = parse_gregorian_date(
+            self.request.query_params.get("scheduledDateFrom"), "scheduledDateFrom"
+        )
+        scheduled_to = parse_gregorian_date(
+            self.request.query_params.get("scheduledDateTo"), "scheduledDateTo"
+        )
+        validate_date_range(
+            scheduled_from, scheduled_to, "scheduledDateFrom", "scheduledDateTo"
+        )
+        queryset = apply_datetime_field_range(
+            queryset, "scheduled_at", scheduled_from, scheduled_to
+        )
 
         return queryset
 

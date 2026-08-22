@@ -5,6 +5,11 @@ from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.common.date_filters import (
+    apply_date_field_range,
+    parse_gregorian_date,
+    validate_date_range,
+)
 from apps.common.thread_locals import set_current_user
 
 from .history import task_history_items
@@ -68,6 +73,18 @@ class TaskViewSet(viewsets.ModelViewSet):
         task_type = self.request.query_params.get("taskType")
         if task_type:
             qs = qs.filter(task_type=task_type.upper())
+
+        # Inclusive due-date range. Dates are Gregorian YYYY-MM-DD (the Jalali
+        # picker converts before sending). ``due_date`` is a DateField, so the
+        # comparison uses the existing (due_date, status) index.
+        due_from = parse_gregorian_date(
+            self.request.query_params.get("dueDateFrom"), "dueDateFrom"
+        )
+        due_to = parse_gregorian_date(
+            self.request.query_params.get("dueDateTo"), "dueDateTo"
+        )
+        validate_date_range(due_from, due_to, "dueDateFrom", "dueDateTo")
+        qs = apply_date_field_range(qs, "due_date", due_from, due_to)
 
         return qs
 

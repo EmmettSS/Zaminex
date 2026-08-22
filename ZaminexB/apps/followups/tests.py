@@ -252,3 +252,184 @@ class FollowUpOrderingTests(TestCase):
         ids = list(FollowUp.objects.values_list("id", flat=True))
         self.assertEqual(ids[0], newer.id)
         self.assertIn(older.id, ids)
+
+
+class FollowUpScheduledDateRangeApiTests(TestCase):
+    """Server-side inclusive scheduled-date range (Asia/Tehran day boundaries)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from apps.accounts.models import UserRole
+
+        cls.admin = User.objects.create_user(
+            username="fu_range_admin", password="pw", role=UserRole.ADMIN
+        )
+        cls.agent = User.objects.create_user(
+            username="fu_range_agent", password="pw", role=UserRole.AGENT
+        )
+        cls.stranger = User.objects.create_user(
+            username="fu_range_stranger", password="pw", role=UserRole.AGENT
+        )
+        cls.prop = Property.objects.create(
+            title="ملک بازه",
+            internal_code="FU-RANGE",
+            consultant=cls.agent,
+            area=80,
+            address="تهران",
+        )
+
+        def fu(title, scheduled_at, follow_type=FollowUpType.CALL):
+            return FollowUp.objects.create(
+                title=title,
+                follow_up_type=follow_type,
+                consultant=cls.agent,
+                contact_name="مخاطب",
+                property=cls.prop,
+                scheduled_at=scheduled_at,
+                status=FollowUpStatus.SCHEDULED,
+            )
+
+        tehran = datetime.timezone(datetime.timedelta(hours=3, minutes=30))
+        # The five distinct Tehran calendar days around the range.
+        cls.before = fu(
+            "قبل", datetime.datetime(2026, 7, 15, 12, 0, tzinfo=tehran)
+        )
+        # Exactly the start of 2026-07-16 Tehran (00:00 local == 20:30 UTC prev day).
+        cls.start_edge = fu(
+            "لبه شروع", datetime.datetime(2026, 7, 16, 0, 0, tzinfo=tehran)
+        )
+        cls.mid = fu(
+            "وسط", datetime.datetime(2026, 7, 17, 15, 30, tzinfo=tehran)
+        )
+        # Last instant of 2026-07-18 Tehran (23:59 local).
+        cls.end_edge = fu(
+            "لبه پایان", datetime.datetime(2026, 7, 18, 23, 59, tzinfo=tehran)
+        )
+        cls.after = fu(
+            "بعد", datetime.datetime(2026, 7, 19, 9, 0, tzinfo=tehran)
+        )
+        # Another consultant's follow-up *inside* the July range. Admins can
+        # see it (proving the endpoint is not globally restricted), but a
+        # consultant-scoped query and the stranger's own query must behave.
+        cls.other = FollowUp.objects.create(
+            title="غریبه",
+            follow_up_type=FollowUpType.EMAIL,
+            consultant=cls.stranger,
+            contact_name="غریبه",
+            scheduled_at=datetime.datetime(2026, 7, 17, 10, 0, tzinfo=tehran),
+            status=FollowUpStatus.SCHEDULED,
+        )
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def _ids(self, resp):
+        self.assertEqual(resp.status_code, 200, resp.content[:400])
+        payload = resp.json()
+        rows = payload["results"] if isinstance(payload, dict) else payload
+        return {row["id"] for row in rows}
+
+    def test_inclusive_tehran_day_boundaries(self):
+        self.client.force_authenticate(user=self.admin)
+        ids = self._ids(
+            self.client.get(
+                "/followupa/api/followups/?consultantId=%s&scheduledDateFrom=2026-07-16&scheduledDateTo=2026-07-18"
+                % self.agent.id
+            )
+        )
+        self.assertEqual(
+            ids,
+            {self.start_edge.id, self.mid.id, self.end_edge.id},
+        )
+
+    def test_midnight_tehran_boundary_is_local_day(self):
+        """00:00 Tehran on the 16th serialises to the 15th in UTC; slicing the
+        string would wrongly exclude it. The Asia/Tehran range must include it."""
+        self.client.force_authenticate(user=self.admin)
+        ids = self._ids(
+            self.client.get(
+                "/followupa/api/followups/?scheduledDateFrom=2026-07-16&scheduledDateTo=2026-07-16"
+            )
+        )
+        self.assertEqual(ids, {self.start_edge.id})
+
+    def test_from_only(self):
+        self.client.force_authenticate(user=self.admin)
+        ids = self._ids(
+            self.client.get(
+                "/followupa/api/followups/?consultantId=%s&scheduledDateFrom=2026-07-18"
+                % self.agent.id
+            )
+        )
+        self.assertEqual(ids, {self.end_edge.id, self.after.id})
+
+    def test_to_only(self):
+        self.client.force_authenticate(user=self.admin)
+        ids = self._ids(
+            self.client.get(
+                "/followupa/api/followups/?consultantId=%s&scheduledDateTo=2026-07-16"
+                % self.agent.id
+            )
+        )
+        self.assertEqual(ids, {self.before.id, self.start_edge.id})
+
+    def test_outside_range_excluded(self):
+        self.client.force_authenticate(user=self.admin)
+        ids = self._ids(
+            self.client.get(
+                "/followupa/api/followups/?consultantId=%s&scheduledDateFrom=2026-08-01&scheduledDateTo=2026-08-02"
+                % self.agent.id
+            )
+        )
+        self.assertEqual(ids, set())
+
+    def test_combines_with_type_filter(self):
+        self.client.force_authenticate(user=self.admin)
+        # Make mid an Email; a Call-only range must drop it.
+        self.mid.follow_up_type = FollowUpType.EMAIL
+        self.mid.save()
+        ids = self._ids(
+            self.client.get(
+                "/followupa/api/followups/?consultantId=%s&scheduledDateFrom=2026-07-16&scheduledDateTo=2026-07-18&type=Call"
+                % self.agent.id
+            )
+        )
+        self.assertEqual(ids, {self.start_edge.id, self.end_edge.id})
+
+    def test_consultant_scope_is_enforced(self):
+        self.client.force_authenticate(user=self.agent)
+        ids = self._ids(
+            self.client.get(
+                "/followupa/api/followups/?scheduledDateFrom=2026-07-16&scheduledDateTo=2026-07-18"
+            )
+        )
+        self.assertNotIn(self.other.id, ids)
+        self.assertEqual(
+            ids,
+            {self.start_edge.id, self.mid.id, self.end_edge.id},
+        )
+
+    def test_stranger_sees_only_own(self):
+        self.client.force_authenticate(user=self.stranger)
+        ids = self._ids(
+            self.client.get(
+                "/followupa/api/followups/?scheduledDateFrom=2026-07-01&scheduledDateTo=2026-07-31"
+            )
+        )
+        self.assertEqual(ids, {self.other.id})
+
+    def test_invalid_date_returns_400(self):
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get("/followupa/api/followups/?scheduledDateFrom=not-a-date")
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertIn("scheduledDateFrom", resp.json())
+
+    def test_reversed_range_returns_400(self):
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get(
+            "/followupa/api/followups/?scheduledDateFrom=2026-07-20&scheduledDateTo=2026-07-18"
+        )
+        self.assertEqual(resp.status_code, 400, resp.content)
+        body = resp.json()
+        self.assertIn("scheduledDateFrom", body)
+        self.assertIn("scheduledDateTo", body)

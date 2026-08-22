@@ -246,3 +246,144 @@ class TaskHistoryAPITests(TestCase):
         detail = self.client.get(f"/tasks/api/tasks/{task_id}/")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["note"], "یادداشت تستی برای این وظیفه")
+
+
+class TaskDueDateRangeApiTests(TestCase):
+    """Server-side inclusive due-date range filtering for "وظایف من"."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.admin = User.objects.create_user(
+            username="range_admin", password="pw", role=UserRole.ADMIN
+        )
+        cls.agent = User.objects.create_user(
+            username="range_agent", password="pw", role=UserRole.AGENT
+        )
+        cls.stranger = User.objects.create_user(
+            username="range_stranger", password="pw", role=UserRole.AGENT
+        )
+        # Five tasks on consecutive days, all assigned to cls.agent.
+        cls.days = [
+            datetime.date(2026, 7, 15),
+            datetime.date(2026, 7, 18),
+            datetime.date(2026, 7, 19),
+            datetime.date(2026, 7, 20),
+            datetime.date(2026, 7, 22),
+        ]
+        cls.tasks = [
+            Task.objects.create(
+                title=f"task {d.isoformat()}",
+                assigned_to=cls.agent,
+                created_by=cls.admin,
+                due_date=d,
+                status=Task.Status.PENDING,
+            )
+            for d in cls.days
+        ]
+        # A task belonging to another consultant. It is created by that
+        # consultant (not the admin), so an admin can still see it but a
+        # different consultant must never receive it through the API.
+        cls.other_task = Task.objects.create(
+            title="stranger task",
+            assigned_to=cls.stranger,
+            created_by=cls.stranger,
+            due_date=datetime.date(2026, 8, 1),
+            status=Task.Status.PENDING,
+        )
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def _ids(self, resp):
+        payload = resp.json()
+        rows = payload["results"] if isinstance(payload, dict) else payload
+        return {row["id"] for row in rows}
+
+    def test_inclusive_both_endpoints(self):
+        self.client.force_authenticate(user=self.admin)
+        # Scope to the test agent so the assertions are isolated from other
+        # rows in the shared test database.
+        resp = self.client.get(
+            "/tasks/api/tasks/?assignedTo=%s&dueDateFrom=2026-07-18&dueDateTo=2026-07-20"
+            % self.agent.id
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        ids = self._ids(resp)
+        # The 18th, 19th and 20th are included (both ends inclusive).
+        self.assertEqual(
+            ids,
+            {self.tasks[1].id, self.tasks[2].id, self.tasks[3].id},
+        )
+
+    def test_from_only(self):
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get(
+            "/tasks/api/tasks/?assignedTo=%s&dueDateFrom=2026-07-20" % self.agent.id
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        ids = self._ids(resp)
+        self.assertEqual(ids, {self.tasks[3].id, self.tasks[4].id})
+
+    def test_to_only(self):
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get("/tasks/api/tasks/?dueDateTo=2026-07-18")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        ids = self._ids(resp)
+        self.assertEqual(ids, {self.tasks[0].id, self.tasks[1].id})
+
+    def test_before_and_after_range_excluded(self):
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get("/tasks/api/tasks/?dueDateFrom=2026-07-16&dueDateTo=2026-07-17")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(self._ids(resp), set())
+
+    def test_combines_with_status_filter(self):
+        # Mark the 19th completed; a PENDING-only range query must drop it.
+        self.tasks[2].status = Task.Status.COMPLETED
+        self.tasks[2].save()
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get(
+            "/tasks/api/tasks/?assignedTo=%s&dueDateFrom=2026-07-18&dueDateTo=2026-07-20&status=PENDING"
+            % self.agent.id
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(self._ids(resp), {self.tasks[1].id, self.tasks[3].id})
+
+    def test_consultant_scope_is_enforced(self):
+        # A consultant only ever sees their own tasks even with the range.
+        self.client.force_authenticate(user=self.agent)
+        resp = self.client.get(
+            "/tasks/api/tasks/?assignedTo=%s&dueDateFrom=2026-07-18&dueDateTo=2026-07-20"
+            % self.agent.id
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        ids = self._ids(resp)
+        self.assertNotIn(self.other_task.id, ids)
+        self.assertEqual(
+            ids,
+            {self.tasks[1].id, self.tasks[2].id, self.tasks[3].id},
+        )
+
+    def test_stranger_cannot_see_other_consultant_tasks(self):
+        self.client.force_authenticate(user=self.stranger)
+        # No explicit assignedTo: server restricts non-admins to tasks they
+        # are assigned to (or created). The other agent's task must be absent.
+        resp = self.client.get("/tasks/api/tasks/?dueDateFrom=2026-07-18&dueDateTo=2026-07-20")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertNotIn(self.other_task.id, self._ids(resp))
+        self.assertNotIn(self.tasks[2].id, self._ids(resp))
+
+    def test_invalid_date_returns_400(self):
+        self.client.force_authenticate(user=self.admin)
+        # 2026-13-40 is not a real date; Django's parse_date rejects it.
+        resp = self.client.get("/tasks/api/tasks/?dueDateFrom=2026-13-40")
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertIn("dueDateFrom", resp.json())
+
+    def test_reversed_range_returns_400(self):
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get("/tasks/api/tasks/?dueDateFrom=2026-07-20&dueDateTo=2026-07-18")
+        self.assertEqual(resp.status_code, 400, resp.content)
+        body = resp.json()
+        self.assertIn("dueDateFrom", body)
+        self.assertIn("dueDateTo", body)
