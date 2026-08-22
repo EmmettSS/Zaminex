@@ -24,10 +24,19 @@ import { statusBadge } from "../../../shared/components/ui/StatusBadge";
 import { ActionMenu } from "../../../shared/components/ActionMenu";
 import {
   Building2, Plus, MapPin, Eye, Edit2, Archive, Search,
-  SlidersHorizontal, LayoutGrid, List, Users,
+  SlidersHorizontal, LayoutGrid, List, Users, Phone, UserRound,
 } from "lucide-react";
 
-function MyPropertiesPage({
+/**
+ * Consultant-facing property list.
+ *
+ * `variant === "mine"` shows only the current consultant's own (+ shared)
+ * properties and exposes the owner contact (the consultant registered them).
+ * `variant === "all"` shows every property in the system (fetched via the
+ * `scope=all` endpoint) and intentionally omits the owner contact, since
+ * those records belong to other consultants.
+ */
+function PropertiesListView({
   navigate,
   properties,
   consultantId,
@@ -36,6 +45,7 @@ function MyPropertiesPage({
   onArchive,
   csrfToken,
   userName,
+  variant = "mine",
 }: {
   navigate: (p: Page) => void;
   properties: Property[];
@@ -45,6 +55,7 @@ function MyPropertiesPage({
   onArchive: (id: string) => void;
   csrfToken?: string;
   userName?: string;
+  variant?: "mine" | "all";
 }) {
   const [confirmArchive, setConfirmArchive] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -75,7 +86,8 @@ function MyPropertiesPage({
     return (city.districts || []).map((d: any) => d.displayName);
   })();
 
-  // Include the consultant's own properties AND shared properties
+  // For the "mine" variant, restrict to the current consultant's own properties
+  // plus any shared ones; the "all" variant uses every property passed in.
   const mine = useMemo(() => {
     return (properties ?? []).filter((p) => {
       const isOwn = String(p.consultantId ?? p.consultant ?? "") === String(consultantId ?? "");
@@ -84,53 +96,50 @@ function MyPropertiesPage({
     });
   }, [properties, consultantId]);
 
-  // Check if there are any shared properties to show the consultant filter
+  const source = variant === "all" ? properties ?? [] : mine;
+
+  // The consultant filter is always useful on the all-properties tab (records
+  // span every consultant); on the "mine" tab it is only shown when shared
+  // properties from other consultants are visible.
   const hasSharedProperties = mine.some((p) => (p as any).isShared);
+  const showConsultantFilter =
+    variant === "all" ? source.length > 0 : hasSharedProperties;
 
   // Build the consultant filter options (formatted for ConsultantCombobox): the
-  // current consultant themselves (so they can filter to their own properties)
-  // plus every consultant who owns a shared property visible here.
-  const sharedConsultants = useMemo<ConsultantItem[]>(() => {
+  // current consultant themselves, plus every consultant who owns a property in
+  // the current source list.
+  const consultantOptions = useMemo<ConsultantItem[]>(() => {
     const seen = new Map<string, ConsultantItem>();
+    const add = (id: string, name: string) => {
+      if (!id || seen.has(id)) return;
+      seen.set(id, {
+        id,
+        full_name: name,
+        user: { id, username: name, role: "AGENT", name, email: "", mobile: "" },
+      } as any);
+    };
     // Always include the current consultant so they can filter to their own properties.
     if (consultantId) {
-      const selfProp = mine.find(
+      const selfProp = source.find(
         (p) => String(p.consultantId ?? p.consultant ?? "") === String(consultantId)
       );
-      const selfName =
-        selfProp?.consultantName || consultantLabel(selfProp || {}) || userName || "من";
-      seen.set(String(consultantId), {
-        id: String(consultantId),
-        full_name: selfName,
-        user: {
-          id: String(consultantId),
-          username: selfName,
-          role: "AGENT",
-          name: selfName,
-          email: "",
-          mobile: "",
-        },
-      } as any);
+      add(
+        String(consultantId),
+        selfProp?.consultantName || consultantLabel(selfProp || {}) || userName || "من"
+      );
     }
-    mine.forEach((p) => {
-      if ((p as any).isShared) {
-        const id = String(p.consultantId ?? p.consultant ?? "");
-        if (id && !seen.has(id)) {
-          const name = p.consultantName || consultantLabel(p) || "نامشخص";
-          seen.set(id, {
-            id: id,
-            full_name: name,
-            user: { id, username: name, role: "AGENT", name, email: "", mobile: "" },
-          } as any);
-        }
-      }
+    source.forEach((p) => {
+      add(
+        String(p.consultantId ?? p.consultant ?? ""),
+        p.consultantName || consultantLabel(p) || "نامشخص"
+      );
     });
     return Array.from(seen.values());
-  }, [mine, consultantId, userName]);
+  }, [source, consultantId, userName]);
 
   // Apply search and filters
   const filtered = useMemo(() => {
-    let result = mine;
+    let result = source;
 
     // Search — same fuzzy gateway the comboboxes use (similar + typo-tolerant).
     if (search.trim()) {
@@ -187,7 +196,7 @@ function MyPropertiesPage({
     }
 
     return result;
-  }, [mine, search, filters, propertyTypeRef]);
+  }, [source, search, filters, propertyTypeRef]);
 
   const totalCount = filtered.length;
   const paginated = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -203,17 +212,37 @@ function MyPropertiesPage({
 
   const activeFilterCount = Object.values(filters).filter(Boolean).length + (propertyTypeRef ? 1 : 0);
 
+  const isMine = variant === "mine";
+  const ownerName = (p: Property) =>
+    [p.ownerFirstName, p.ownerLastName].filter(Boolean).join(" ").trim();
+  const pageTitle = isMine ? "ملک های من" : "همه املاک";
+  const pageSubtitle = isMine
+    ? `${totalCount.toLocaleString("fa-IR")} ملک قابل مشاهده`
+    : `${totalCount.toLocaleString("fa-IR")} ملک در سیستم`;
+  const tableColumns = isMine ? 9 : 7;
+
+  // On the "همه املاک" tab a consultant may view any record, but may only
+  // edit/archive the ones they own (or shared ones) — mirroring the backend.
+  const canManage = (p: Property) =>
+    isMine ||
+    (p as any).isShared === true ||
+    String(p.consultantId ?? p.consultant ?? "") === String(consultantId ?? "");
+
   const rowActions = (p: Property) => [
     { label: "مشاهده جزئیات", icon: <Eye size={12} />, onClick: () => openPropertyDetail(String(p.id)) },
-    { label: "ویرایش", icon: <Edit2 size={12} />, onClick: () => openPropertyEdit(String(p.id)) },
-    { label: "بایگانی", icon: <Archive size={12} />, onClick: () => setConfirmArchive(String(p.id)) },
+    ...(canManage(p)
+      ? [
+          { label: "ویرایش", icon: <Edit2 size={12} />, onClick: () => openPropertyEdit(String(p.id)) },
+          { label: "بایگانی", icon: <Archive size={12} />, onClick: () => setConfirmArchive(String(p.id)) },
+        ]
+      : []),
   ];
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <PageHeader
-        title="املاک من"
-        subtitle={`${totalCount.toLocaleString("fa-IR")} ملک قابل مشاهده`}
+        title={pageTitle}
+        subtitle={pageSubtitle}
         actions={
           <Btn variant="primary" size="sm" onClick={() => navigate("add-property")}>
             <Plus size={13} />
@@ -277,11 +306,11 @@ function MyPropertiesPage({
       {showFilters && (
         <Card className="p-4 mb-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 items-end">
-            {hasSharedProperties && (
+            {showConsultantFilter && (
               <ConsultantCombobox
                 value={filters.consultant}
                 onChange={(v) => setFilter("consultant", v)}
-                consultants={sharedConsultants}
+                consultants={consultantOptions}
               />
             )}
             <SelectField
@@ -318,11 +347,13 @@ function MyPropertiesPage({
         </Card>
       )}
 
-      {mine.length === 0 ? (
+      {source.length === 0 ? (
         <EmptyState
           icon={<Building2 size={28} />}
           title="ملکی وجود ندارد"
-          description="املاک واگذارشده به شما و املاک اشتراکی در اینجا نمایش داده می‌شوند."
+          description={isMine
+            ? "املاک واگذارشده به شما و املاک اشتراکی در اینجا نمایش داده می‌شوند."
+            : "هیچ ملکی در سیستم ثبت نشده است."}
           action={
             <Btn variant="primary" size="sm" onClick={() => navigate("add-property")}>
               <Plus size={13} />
@@ -374,9 +405,21 @@ function MyPropertiesPage({
                     <h3 className="text-xs font-semibold mb-2 line-clamp-1">
                       {p.title || "بدون عنوان"}
                     </h3>
+                    {isMine && (ownerName(p) || p.ownerPhone) && (
+                      <p className="text-[11px] text-muted-foreground mb-2 flex items-center gap-1.5 flex-wrap">
+                        <UserRound size={11} className="flex-shrink-0" />
+                        <span className="truncate">{ownerName(p) || "—"}</span>
+                        {p.ownerPhone && (
+                          <span className="flex items-center gap-1" dir="ltr">
+                            <Phone size={10} />
+                            {p.ownerPhone}
+                          </span>
+                        )}
+                      </p>
+                    )}
                     <div className="flex items-center justify-between gap-2">
                       {statusBadge(p.propertyStatus || "available")}
-                      {(p as any).isShared && (
+                      {(variant === "all" || (p as any).isShared) && (
                         <div className="flex items-center gap-1.5">
                           <ProfileAvatar
                             initials={(p.consultantName || "??").split(" ").map((w) => w[0]).join("").slice(0, 2)}
@@ -418,6 +461,8 @@ function MyPropertiesPage({
                     <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground whitespace-nowrap">نوع</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground whitespace-nowrap">محله</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground whitespace-nowrap">وضعیت</th>
+                    {isMine && <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground whitespace-nowrap">مالک</th>}
+                    {isMine && <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground whitespace-nowrap">شماره موبایل مالک</th>}
                     <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground whitespace-nowrap">مشاور</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground whitespace-nowrap">عملیات</th>
                   </tr>
@@ -425,7 +470,7 @@ function MyPropertiesPage({
                 <tbody className="divide-y divide-border">
                   {paginated.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                      <td colSpan={tableColumns} className="px-4 py-12 text-center text-sm text-muted-foreground">
                         ملکی با فیلترهای فعلی پیدا نشد.
                       </td>
                     </tr>
@@ -447,8 +492,21 @@ function MyPropertiesPage({
                           </span>
                         </td>
                         <td className="px-4 py-3">{statusBadge(p.propertyStatus || "available")}</td>
+                        {isMine && (
+                          <td className="px-4 py-3 text-xs">
+                            <span className="flex items-center gap-1.5">
+                              <UserRound size={11} className="text-muted-foreground flex-shrink-0" />
+                              <span className="truncate max-w-32">{ownerName(p) || "—"}</span>
+                            </span>
+                          </td>
+                        )}
+                        {isMine && (
+                          <td className="px-4 py-3 text-xs text-muted-foreground" dir="ltr">
+                            {p.ownerPhone || "—"}
+                          </td>
+                        )}
                         <td className="px-4 py-3">
-                          {(p as any).isShared ? (
+                          {variant === "all" || (p as any).isShared ? (
                             <div className="flex items-center gap-1.5">
                               <ProfileAvatar
                                 initials={(p.consultantName || "??").split(" ").map((w) => w[0]).join("").slice(0, 2)}
@@ -465,12 +523,16 @@ function MyPropertiesPage({
                             <button onClick={() => openPropertyDetail(String(p.id))} className="p-1.5 hover:bg-secondary rounded-lg transition-colors" title="مشاهده">
                               <Eye size={13} className="text-muted-foreground" />
                             </button>
-                            <button onClick={() => openPropertyEdit(String(p.id))} className="p-1.5 hover:bg-secondary rounded-lg transition-colors" title="ویرایش">
-                              <Edit2 size={13} className="text-muted-foreground" />
-                            </button>
-                            <button onClick={() => setConfirmArchive(String(p.id))} className="p-1.5 hover:bg-amber-50 rounded-lg transition-colors" title="بایگانی">
-                              <Archive size={13} className="text-muted-foreground" />
-                            </button>
+                            {canManage(p) && (
+                              <button onClick={() => openPropertyEdit(String(p.id))} className="p-1.5 hover:bg-secondary rounded-lg transition-colors" title="ویرایش">
+                                <Edit2 size={13} className="text-muted-foreground" />
+                              </button>
+                            )}
+                            {canManage(p) && (
+                              <button onClick={() => setConfirmArchive(String(p.id))} className="p-1.5 hover:bg-amber-50 rounded-lg transition-colors" title="بایگانی">
+                                <Archive size={13} className="text-muted-foreground" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -511,4 +573,14 @@ function MyPropertiesPage({
   );
 }
 
-export { MyPropertiesPage };
+/** The current consultant's own (+ shared) properties, with owner contact. */
+function MyPropertiesPage(props: React.ComponentProps<typeof PropertiesListView>) {
+  return <PropertiesListView {...props} variant="mine" />;
+}
+
+/** Every property registered in the system; owner contact is intentionally hidden. */
+function AllPropertiesPage(props: React.ComponentProps<typeof PropertiesListView>) {
+  return <PropertiesListView {...props} variant="all" />;
+}
+
+export { MyPropertiesPage, AllPropertiesPage };

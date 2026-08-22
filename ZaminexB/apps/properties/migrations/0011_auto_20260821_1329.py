@@ -3,7 +3,7 @@
 from django.db import migrations, transaction
 
 
-def _generate_for_existing(apps):
+def _generate_for_existing(apps, schema_editor):
     Property = apps.get_model("properties", "Property")
     props = list(Property.objects.all().order_by("id"))
 

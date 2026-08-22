@@ -291,6 +291,8 @@ function PropertyDetail({ navigate, role, property, onArchive, onDelete, onUpdat
                     ["شهر", (property as any).cityName || (property as any).city?.displayName || (property as any).city?.display_name || (property as any).locationPath?.split(" / ")?.[1] || null],
                     ["محله", (property as any).district || property.neighborhood || (typeof (property as any).district === 'object' ? ((property as any).district?.displayName || (property as any).district?.display_name || (property as any).district?.name) : null) || (property as any).locationPath?.split(" / ")?.slice(-1)?.[0] || null],
                     ["مسیر کامل موقعیت", (property as any).locationPath || ((property as any).provinceName && (property as any).cityName && (property as any).district ? `${(property as any).provinceName} / ${(property as any).cityName} / ${(property as any).district}` : null)],
+                    ["نام مالک", [[property.ownerFirstName, property.ownerLastName].filter(Boolean).join(" "), (property as any).owner_first_name, (property as any).owner_last_name].filter(Boolean).join(" ") || null],
+                    ["شماره موبایل مالک", property.ownerPhone || (property as any).owner_phone || null],
                   ].filter(([, v]) => v !== null && v !== undefined && v !== '')).map(([k, v]) => (
                     <div key={k} className="p-3 bg-secondary rounded-xl">
                       <p className="text-xs text-muted-foreground mb-1">{k}</p>

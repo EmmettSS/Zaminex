@@ -152,6 +152,20 @@ class Property(models.Model):
         help_text="وقتی فعال باشد، همه مشاوران ملک را می‌بینند و می‌توانند ویرایش کنند (به جز تغییر مشاور مسئول).",
     )
 
+    # --- owner contact (اطلاعات مالک) --------------------------------------
+    # Fields are nullable at the database level so historical rows and the
+    # REST API stay compatible during the transition; the write path enforces
+    # them (the create serializer and the front-end form require them).
+    owner_first_name = models.CharField(
+        max_length=100, blank=True, default="", verbose_name="نام مالک"
+    )
+    owner_last_name = models.CharField(
+        max_length=100, blank=True, default="", verbose_name="نام خانوادگی مالک"
+    )
+    owner_phone = models.CharField(
+        max_length=20, blank=True, default="", verbose_name="شماره موبایل مالک"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ ایجاد")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="تاریخ بروزرسانی")
 

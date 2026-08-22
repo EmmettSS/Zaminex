@@ -15,7 +15,7 @@ type Page =
   | "property-reports"
   | "activity"
   | "settings-workspace" | "settings-users" | "settings-permissions" | "manage-districts" | "districts" | "manage-attributes"
-  | "consultant-dashboard" | "my-properties" | "my-listings" | "my-tasks" | "my-followups"
+  | "consultant-dashboard" | "my-properties" | "all-properties" | "my-listings" | "my-tasks" | "my-followups"
   | "my-profile" | "my-profile-edit" | "my-profile-security";
 
 interface TaskHistoryEntry { id: string; action: string; from?: string; to?: string; note?: string; user: string; time: string; }
@@ -105,6 +105,9 @@ type Property = {
   consultantName?: string;
   consultantId?: string | number;
   consultantRole?: string | null;
+  ownerFirstName?: string;
+  ownerLastName?: string;
+  ownerPhone?: string;
   isShared?: boolean;
   date?: string;
   views?: number;
