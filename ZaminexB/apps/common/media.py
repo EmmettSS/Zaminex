@@ -5,7 +5,13 @@ implementation only checked authentication, which let any logged-in consultant
 download every uploaded file by guessing its name. This module adds:
 
 * path traversal protection (``..`` and absolute paths are rejected);
-* per-entity ownership checks for property images and profile avatars.
+* property images are readable by every authenticated user — they follow the
+  read access of the consultant "همه املاک" tab, where every consultant may
+  view the details (including the gallery) of every property in the system.
+  Only registered ``PropertyImage`` files are served, so arbitrary files under
+  MEDIA_ROOT can still not be downloaded by guessing a name, and mutating the
+  gallery (upload/delete/reorder) stays owner/admin-only in the API views;
+* per-entity ownership checks for profile avatars (users see only their own).
 """
 
 from __future__ import annotations
@@ -43,19 +49,14 @@ def _can_access_media(user, rel_path: str) -> bool:
     parts = PurePosixPath(rel_path).parts
     if not parts:
         return False
-    # Property images: the consultant who owns the property, or anyone if
-    # the property is shared.
+    # Property images: readable by every authenticated user, mirroring the
+    # read access of the consultant "همه املاک" tab (a consultant may view the
+    # details of every property, so the gallery must render there too). The
+    # file must still belong to a registered PropertyImage row, which keeps
+    # arbitrary MEDIA_ROOT files from being downloadable by name. Mutating
+    # the gallery stays owner/admin-only and is enforced by the API views.
     if parts[0] == "properties":
-        image = (
-            PropertyImage.objects.select_related("property")
-            .filter(image=rel_path)
-            .only("property__consultant_id", "property__is_shared")
-            .first()
-        )
-        if image is None:
-            return False
-        prop = image.property
-        return bool(prop and (prop.consultant_id == user.pk or prop.is_shared))
+        return PropertyImage.objects.filter(image=rel_path).exists()
     # Consultant avatars: consultants may see their own avatar only. We do
     # not expose other consultants' profile photos to non-admins.
     if parts[0] == "consultants":

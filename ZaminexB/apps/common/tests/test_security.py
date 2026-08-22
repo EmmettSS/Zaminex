@@ -284,8 +284,8 @@ class MediaAuthTests(TestCase):
 
         logged = Client()
         logged.force_login(self.agent)
-        # Unknown/loose files under MEDIA_ROOT are now denied by default:
-        # only known profile/property images with an owner are served.
+        # Unknown/loose files under MEDIA_ROOT are denied by default: only
+        # registered profile/property image files are served.
         allowed = logged.get("/media/sec-probe.txt")
         self.assertEqual(allowed.status_code, 403)
 
@@ -340,9 +340,21 @@ class ProtectedMediaTests(TestCase):
         resp = self.client.get(f"/media/{self.rel_path}")
         self.assertEqual(resp.status_code, 403)
 
-    def test_other_consultant_cannot_download(self):
+    def test_other_consultant_can_view_the_image(self):
+        # Property images follow the read access of the "همه املاک" tab:
+        # every consultant may view the details of every property, so the
+        # gallery must load for them too. Mutating the gallery (upload,
+        # delete, reorder) stays owner/admin-only in the API views.
         self.client.force_login(self.other)
         resp = self.client.get(f"/media/{self.rel_path}")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_unregistered_property_path_is_still_denied(self):
+        # A path that merely looks like a property image must not become
+        # downloadable by guessing the file name: only files backed by a
+        # PropertyImage row are served.
+        self.client.force_login(self.other)
+        resp = self.client.get("/media/properties/images/guessed-name.png")
         self.assertEqual(resp.status_code, 403)
 
     def test_owner_and_admin_can_download(self):
