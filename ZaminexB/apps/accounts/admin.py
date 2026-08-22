@@ -98,7 +98,7 @@ class SmsProviderSettingsAdmin(admin.ModelAdmin):
                 "fields": ("smsir_api_key", "smsir_line_number", "smsir_template_id"),
                 "description": (
                     "کلید API، شماره خط (در صورت نیاز) و شناسهٔ قالب «تأیید» از پنل sms.ir. "
-                    "کد تأیید در پارامتر PARAMETER1 قالب قرار می‌گیرد."
+                    "کد تأیید در پارامتر CODE قالب قرار می‌گیرد."
                 ),
             },
         ),

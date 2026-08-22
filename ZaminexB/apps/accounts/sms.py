@@ -290,7 +290,7 @@ def _smsir_send(config: SmsProviderSettings, mobile: str, code: str) -> None:
     payload: dict = {
         "mobile": mobile,
         "templateId": int(template_id) if template_id.isdigit() else template_id,
-        "parameters": [{"name": "PARAMETER1", "value": code}],
+        "parameters": [{"name": "CODE", "value": code}],
     }
     line_number = (config.smsir_line_number or "").strip()
     if line_number:
