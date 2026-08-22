@@ -165,6 +165,10 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   const [tasksError, setTasksError] = useState<string | null>(null);
   const [taskSummary, setTaskSummary] = useState<{ total: number; pending: number; in_progress: number; completed: number; cancelled: number; overdue: number } | null>(null);
   const [taskTypesList, setTaskTypesList] = useState<Array<{ value: string; label: string }>>([]);
+  // Bumped whenever a task mutation changes the list, so "وظایف من"
+  // re-runs its server-filtered query.
+  const [myTasksRefreshKey, setMyTasksRefreshKey] = useState(0);
+  const bumpMyTasks = useCallback(() => setMyTasksRefreshKey((k) => k + 1), []);
 
   // ── Dashboard summary state ──────────────────────────────────────────
   const [dashboardKpis, setDashboardKpis] = useState({
@@ -558,6 +562,11 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   );
 
   // ── Follow-ups API integration ───────────────────────────────────────
+  // Bumped after every archive/delete/complete/create so the list page
+  // re-runs its (server-filtered) query.
+  const [followupsRefreshKey, setFollowupsRefreshKey] = useState(0);
+  const bumpFollowups = useCallback(() => setFollowupsRefreshKey((k) => k + 1), []);
+
   const fetchFollowups = useCallback(async () => {
     setFollowupsLoading(true);
     setFollowupsError(null);
@@ -579,6 +588,41 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     }
   }, [initialData.csrfToken]);
 
+  // Server-side filtered fetch for the follow-ups list. Query params are
+  // built explicitly so type/consultant/property AND the Jalali→Gregorian
+  // scheduled-date range are all applied in the database (the consultant
+  // scope is enforced there too, never weakened). The dashboard widget keeps
+  // using the unfiltered `fetchFollowups` above.
+  const loadFollowups = useCallback(
+    async (filters: {
+      type?: string;
+      consultantId?: string;
+      propertyId?: string;
+      scheduledDateFrom?: string;
+      scheduledDateTo?: string;
+    }): Promise<FollowUp[]> => {
+      const params = new URLSearchParams();
+      params.set("archived", "false");
+      if (filters.type && filters.type !== "all") params.set("type", filters.type);
+      if (filters.consultantId) params.set("consultantId", filters.consultantId);
+      if (filters.propertyId) params.set("propertyId", filters.propertyId);
+      if (filters.scheduledDateFrom) params.set("scheduledDateFrom", filters.scheduledDateFrom);
+      if (filters.scheduledDateTo) params.set("scheduledDateTo", filters.scheduledDateTo);
+      const res = await apiFetch(
+        `/followupa/api/followups/?${params.toString()}`,
+        { method: "GET" },
+        initialData.csrfToken
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(apiErrorMessage(data, "خطا در دریافت پیگیری‌ها"));
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.results ?? []);
+    },
+    [initialData.csrfToken]
+  );
+
   const createFollowup = useCallback(async (payload: FollowUpCreatePayload) => {
     setFollowupsLoading(true);
     setFollowupsError(null);
@@ -591,7 +635,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
         const message = data && typeof data === "object" ? Object.values(data).flat().join(" / ") : "خطا در ثبت پیگیری";
         throw new Error(message);
       }
-      await fetchFollowups();
+      await fetchFollowups(); bumpFollowups();
     } catch (err) {
       setFollowupsError(
         err instanceof Error ? err.message : "خطا در ثبت پیگیری"
@@ -607,7 +651,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
       const res = await apiFetch(`/followupa/api/followups/${id}/archive/`, { method: "POST" }, initialData.csrfToken);
       if (!res.ok) throw new Error("خطا در بایگانی پیگیری");
       toast({ type: "success", message: "پیگیری بایگانی شد." });
-      await fetchFollowups();
+      await fetchFollowups(); bumpFollowups();
     } catch (err: any) {
       toast({ type: "error", message: err?.message || "خطای ناشناخته" });
     }
@@ -618,7 +662,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
       const res = await apiFetch(`/followupa/api/followups/${id}/`, { method: "DELETE" }, initialData.csrfToken);
       if (!res.ok) throw new Error("خطا در حذف پیگیری");
       toast({ type: "success", message: "پیگیری حذف شد." });
-      await fetchFollowups();
+      await fetchFollowups(); bumpFollowups();
     } catch (err: any) {
       toast({ type: "error", message: err?.message || "خطای ناشناخته" });
     }
@@ -632,7 +676,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
       }, initialData.csrfToken);
       if (!res.ok) throw new Error("خطا در تکمیل پیگیری");
       toast({ type: "success", message: "پیگیری تکمیل شد." });
-      await fetchFollowups();
+      await fetchFollowups(); bumpFollowups();
     } catch (err: any) {
       toast({ type: "error", message: err?.message || "خطای ناشناخته" });
     }
@@ -656,7 +700,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
         setFollowups((prev) => prev.map((f) => String(f.id) === String(id) ? updated : f));
         setSelectedFollowup(updated);
       }
-      await fetchFollowups();
+      await fetchFollowups(); bumpFollowups();
     } catch (err) {
       setFollowupsError(
         err instanceof Error ? err.message : "خطا در ویرایش پیگیری"
@@ -684,8 +728,10 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     setCmdOpen(false);
   }, [followups]);
 
+  // The follow-ups list pages load their own server-filtered data via
+  // `loadFollowups`. Keep the unfiltered fetch for the dashboard widget only.
   useEffect(() => {
-    if (page !== "follow-ups" && page !== "my-followups") return;
+    if (page !== "consultant-dashboard" && page !== "admin-dashboard") return;
     fetchFollowups();
   }, [page, fetchFollowups]);
 
@@ -1205,12 +1251,29 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   );
 
   // ── Tasks API integration ────────────────────────────────────────────
-  const fetchTasks = useCallback(async () => {
+  // `filters` is forwarded as query params. The "وظایف من" screen sends its
+  // status + due-date range here so filtering runs in the database (where the
+  // (due_date, status) index lives) instead of on a client-side page slice.
+  // Other callers omit it and get the full role-scoped list for kanban etc.
+  const fetchTasks = useCallback(async (filters?: { status?: string; dueDateFrom?: string; dueDateTo?: string }) => {
     setTasksLoading(true);
     setTasksError(null);
     try {
-      const res = await apiFetch("/tasks/api/tasks/", { method: "GET" }, initialData.csrfToken);
-      if (!res.ok) throw new Error("خطا در دریافت وظایف");
+      const params = new URLSearchParams();
+      // Consultants only ever see their own tasks; ask the server to scope
+      // them so the response is already correct and index-friendly.
+      if (role === "consultant" && currentConsultantId) {
+        params.set("assignedTo", String(currentConsultantId));
+      }
+      if (filters?.status && filters.status !== "all") params.set("status", filters.status);
+      if (filters?.dueDateFrom) params.set("dueDateFrom", filters.dueDateFrom);
+      if (filters?.dueDateTo) params.set("dueDateTo", filters.dueDateTo);
+      const qs = params.toString();
+      const res = await apiFetch(`/tasks/api/tasks/${qs ? `?${qs}` : ""}`, { method: "GET" }, initialData.csrfToken);
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(apiErrorMessage(data, "خطا در دریافت وظایف"));
+      }
       const data = await res.json();
       const items = Array.isArray(data) ? data : (data.results ?? []);
       setTasks(items);
@@ -1221,7 +1284,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     } finally {
       setTasksLoading(false);
     }
-  }, [initialData.csrfToken]);
+  }, [initialData.csrfToken, role, currentConsultantId]);
 
   const fetchTaskSummary = useCallback(async () => {
     try {
@@ -1247,9 +1310,10 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
       throw new Error(apiErrorMessage(data, "خطا در ایجاد وظیفه"));
     }
     setTasks((prev) => [data, ...prev]);
+    bumpMyTasks();
     fetchTaskSummary();
     return data;
-  }, [initialData.csrfToken, fetchTaskSummary]);
+  }, [initialData.csrfToken, fetchTaskSummary, bumpMyTasks]);
 
   const updateTaskStatus = useCallback(async (id: string, status: string) => {
     const res = await apiFetch(`/tasks/api/tasks/${id}/`, { method: "PATCH", body: JSON.stringify({ status }) }, initialData.csrfToken);
@@ -1258,9 +1322,10 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
       throw new Error(apiErrorMessage(data, "خطا در تغییر وضعیت وظیفه"));
     }
     setTasks((prev) => prev.map((t) => String(t.id) === String(id) ? data : t));
+    bumpMyTasks();
     fetchTaskSummary();
     return data;
-  }, [initialData.csrfToken, fetchTaskSummary]);
+  }, [initialData.csrfToken, fetchTaskSummary, bumpMyTasks]);
 
   const saveTask = useCallback(async (id: string, patch: Record<string, any>) => {
     const res = await apiFetch(`/tasks/api/tasks/${id}/`, { method: "PATCH", body: JSON.stringify(patch) }, initialData.csrfToken);
@@ -1269,8 +1334,9 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
       throw new Error(apiErrorMessage(data, "خطا در ذخیره وظیفه"));
     }
     setTasks((prev) => prev.map((t) => String(t.id) === String(id) ? data : t));
+    bumpMyTasks();
     return data;
-  }, [initialData.csrfToken]);
+  }, [initialData.csrfToken, bumpMyTasks]);
   
   const deleteTask = useCallback(async (id: string) => {
     const res = await apiFetch(`/tasks/api/tasks/${id}/`, { method: "DELETE" }, initialData.csrfToken);
@@ -1279,8 +1345,9 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
       throw new Error(apiErrorMessage(data, "خطا در حذف وظیفه"));
     }
     setTasks((prev) => prev.filter((t) => String(t.id) !== String(id)));
+    bumpMyTasks();
     fetchTaskSummary();
-  }, [initialData.csrfToken, fetchTaskSummary]);
+  }, [initialData.csrfToken, fetchTaskSummary, bumpMyTasks]);
 
   useEffect(() => {
     if (page === "admin-dashboard" || page === "consultant-dashboard") {
@@ -1566,14 +1633,15 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
       case "my-followups":
         return (
           <FollowUpsPage
+            key={page}
             navigate={navigate}
             followups={followups}
-            loading={followupsLoading}
-            error={followupsError}
             onArchive={archiveFollowup}
             onDelete={deleteFollowup}
             onComplete={completeFollowup}
             onEdit={editFollowup}
+            onLoad={loadFollowups}
+            refreshKey={followupsRefreshKey}
             currentUserId={currentConsultantId}
             page={page}
             role={role}
@@ -1677,6 +1745,9 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
           <MyTasksPage
             tasks={tasks}
             consultantId={currentConsultantId}
+            role={role}
+            onLoad={fetchTasks}
+            refreshKey={myTasksRefreshKey}
             onSave={saveTask}
             onStatusChange={updateTaskStatus}
             onDelete={deleteTask}

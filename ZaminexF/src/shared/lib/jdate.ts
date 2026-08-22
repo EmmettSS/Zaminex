@@ -221,6 +221,77 @@ export function formatJalaliDT(v?: string | null): string {
   return `${dateLabel}، ${hm}`;
 }
 
+// -----------------------------------------------------------------------------
+//  Date-range comparison helpers (Gregorian, shared across filter UIs)
+// -----------------------------------------------------------------------------
+// The API and database stay Gregorian. The Jalali picker emits Gregorian
+// "YYYY-MM-DD" bounds (`from`/`to`), and both endpoints are inclusive. These
+// helpers centralise that contract so list screens don't re-implement it.
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Strict Gregorian "YYYY-MM-DD" check used to ignore empty/invalid bounds. */
+export function isISODate(v: string | null | undefined): v is string {
+  return typeof v === "string" && ISO_DATE_RE.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`));
+}
+
+/** True when `date` ("YYYY-MM-DD") lies within the inclusive [from, to] range. Missing bounds are open. */
+export function isDateInRange(
+  date: string | null | undefined,
+  from: string | null | undefined,
+  to: string | null | undefined,
+): boolean {
+  if (!date) return !from && !to;
+  if (from && date < from) return false;
+  if (to && date > to) return false;
+  return true;
+}
+
+/**
+ * Convert any ISO-8601 datetime (e.g. "2026-07-15T21:00:00Z") to its
+ * Asia/Tehran calendar date as "YYYY-MM-DD".
+ *
+ * This is the correct replacement for `value.slice(0, 10)` on timezone-aware
+ * datetimes: with the server storing UTC, a follow-up scheduled just after
+ * Tehran midnight serialises to the previous UTC day, and slicing drops it by
+ * a day. Formatting in the business timezone first avoids that off-by-one.
+ */
+export function tehranCalendarDate(value: string | null | undefined): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    const m = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : "";
+  }
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tehran",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const y = parts.find((p) => p.type === "year")?.value;
+  const m = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  return y && m && day ? `${y}-${m}-${day}` : "";
+}
+
+/** True when an ISO datetime's Asia/Tehran calendar day is within [from, to]. */
+export function isDateTimeInTehranRange(
+  value: string | null | undefined,
+  from: string | null | undefined,
+  to: string | null | undefined,
+): boolean {
+  return isDateInRange(tehranCalendarDate(value), from, to);
+}
+
+/** True when both bounds are valid and `from` is strictly after `to`. */
+export function isInvalidDateOrder(
+  from: string | null | undefined,
+  to: string | null | undefined,
+): boolean {
+  return Boolean(from && to && from > to);
+}
+
 /**
  * Gregorian ISO datetime → Jalali date + clock in Asia/Tehran.
  * Year/day digits are ungrouped (۱۴۰۵ not ۱٬۴۰۵).
