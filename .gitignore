@@ -6,3 +6,5 @@ __pycache__/
 *.sqlite3
 ZaminexF/node_modules/
 ZaminexF/dist/
+.venv/
+__venv__/
