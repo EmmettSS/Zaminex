@@ -12,6 +12,7 @@ import { KpiCard } from "../../../shared/components/ui/KpiCard";
 import { EmptyState } from "../../../shared/components/ui/EmptyState";
 import { PageHeader } from "../../../shared/components/ui/PageHeader";
 import { formatJalaliDT } from "../../../shared/lib/jdate";
+import { JalaliDateInput } from "../../../shared/components/ui/JalaliDateInput";
 import { ConfirmModal } from "../../../shared/components/ConfirmModal";
 import { Pagination } from "../../../shared/components/Pagination";
 import { ConsultantCombobox } from "../../../shared/components/ui/ConsultantCombobox";
@@ -56,12 +57,27 @@ function FollowUpsPage({
   const [typeFilter, setTypeFilter] = useState("all");
   const [consultantFilter, setConsultantFilter] = useState("");
   const [propertyFilter, setPropertyFilter] = useState("");
+  const [scheduledDateFrom, setScheduledDateFrom] = useState("");
+  const [scheduledDateTo, setScheduledDateTo] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  const hasListFilters = Boolean(consultantFilter || propertyFilter);
+  const isMyFollowupsList = page === "my-followups";
+  const hasDateFilter = Boolean(scheduledDateFrom || scheduledDateTo);
+  const hasListFilters = Boolean(consultantFilter || propertyFilter || hasDateFilter);
   const clearListFilters = () => {
     setConsultantFilter("");
     setPropertyFilter("");
+    setScheduledDateFrom("");
+    setScheduledDateTo("");
+  };
+
+  const isInScheduledDateRange = (followup: FollowUp) => {
+    // The API provides ISO datetimes. Comparing their date portions makes the
+    // selected range inclusive regardless of the scheduled clock time.
+    const scheduledDate = String(followup.date || "").slice(0, 10);
+    if (scheduledDateFrom && scheduledDate < scheduledDateFrom) return false;
+    if (scheduledDateTo && scheduledDate > scheduledDateTo) return false;
+    return true;
   };
 
   const scoped =
@@ -80,9 +96,12 @@ function FollowUpsPage({
   });
 
   const shown =
-    page === "my-followups"
+    isMyFollowupsList
       ? currentUserId
-        ? orderedScoped.filter((f) => String(f.consultantId) === String(currentUserId))
+        ? orderedScoped.filter((f) => {
+            if (typeFilter !== "all" && f.type !== typeFilter) return false;
+            return isInScheduledDateRange(f);
+          })
         : []
       : orderedScoped.filter((f) => {
           if (typeFilter !== "all" && f.type !== typeFilter) return false;
@@ -117,11 +136,13 @@ function FollowUpsPage({
           <button key={t} onClick={() => setTypeFilter(t)} className={cx("px-3 py-1.5 rounded-lg text-xs font-medium transition-colors", typeFilter === t ? "bg-primary text-white shadow-sm" : "bg-white border border-border hover:bg-secondary")}>{t === "all" ? "همه انواع" : toPersianFollowupType(t)}</button>
         ))}
       </div>
-      {isAdminList && (
+      {(isAdminList || isMyFollowupsList) && (
         <Card className="p-4 mb-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
-            <ConsultantCombobox label="مشاور" value={consultantFilter} onChange={setConsultantFilter} consultants={consultants} />
-            <PropertyCombobox label="ملک" value={propertyFilter} onChange={setPropertyFilter} properties={properties} />
+            {isAdminList && <ConsultantCombobox label="مشاور" value={consultantFilter} onChange={setConsultantFilter} consultants={consultants} />}
+            {isAdminList && <PropertyCombobox label="ملک" value={propertyFilter} onChange={setPropertyFilter} properties={properties} />}
+            {isMyFollowupsList && <JalaliDateInput label="از تاریخ پیگیری" value={scheduledDateFrom} onChange={setScheduledDateFrom} />}
+            {isMyFollowupsList && <JalaliDateInput label="تا تاریخ پیگیری" value={scheduledDateTo} onChange={setScheduledDateTo} />}
           </div>
           <div className="flex justify-end mt-3">
             <button

@@ -12,6 +12,7 @@ import { KpiCard } from "../../../shared/components/ui/KpiCard";
 import { EmptyState } from "../../../shared/components/ui/EmptyState";
 import { PageHeader } from "../../../shared/components/ui/PageHeader";
 import { formatJalali } from "../../../shared/lib/jdate";
+import { JalaliDateInput } from "../../../shared/components/ui/JalaliDateInput";
 import { ConfirmModal } from "../../../shared/components/ConfirmModal";
 import { Pagination } from "../../../shared/components/Pagination";
 import { DistrictCombobox } from "../../../shared/components/ui/DistrictCombobox";
@@ -30,10 +31,20 @@ function MyTasksPage({ tasks, consultantId, onSave, onStatusChange, onDelete }: 
   onDelete: (id: string) => Promise<void>;
 }) {
   const [statusFilter, setStatusFilter] = useState("all");
+  const [dueDateFrom, setDueDateFrom] = useState("");
+  const [dueDateTo, setDueDateTo] = useState("");
   const [selectedTask, setSelectedTask] = useState<any | null>(null);
   const [confirmDeleteTask, setConfirmDeleteTask] = useState<string | null>(null);
   const myTasks = tasks.filter((t) => String(t.assigneeId) === String(consultantId));
-  const shown = myTasks.filter((t) => statusFilter === "all" || t.status === statusFilter);
+  const hasDateFilter = Boolean(dueDateFrom || dueDateTo);
+  const shown = myTasks.filter((t) => {
+    if (statusFilter !== "all" && t.status !== statusFilter) return false;
+    // Task due dates are Gregorian ISO dates. Lexical comparison is therefore
+    // date-safe and keeps both ends of the selected Jalali range inclusive.
+    if (dueDateFrom && t.due < dueDateFrom) return false;
+    if (dueDateTo && t.due > dueDateTo) return false;
+    return true;
+  });
 
   const taskActions = (t: any) => [
     { label: "مشاهده و ویرایش", icon: <Edit2 size={12} />, onClick: () => setSelectedTask(t) },
@@ -63,6 +74,22 @@ function MyTasksPage({ tasks, consultantId, onSave, onStatusChange, onDelete }: 
           </button>
         ))}
       </div>
+      <Card className="p-4 mb-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <JalaliDateInput label="از تاریخ سررسید" value={dueDateFrom} onChange={setDueDateFrom} />
+          <JalaliDateInput label="تا تاریخ سررسید" value={dueDateTo} onChange={setDueDateTo} />
+        </div>
+        <div className="flex justify-end mt-3">
+          <button
+            type="button"
+            onClick={() => { setDueDateFrom(""); setDueDateTo(""); }}
+            disabled={!hasDateFilter}
+            className={cx("text-xs transition-colors", hasDateFilter ? "text-destructive hover:underline" : "text-muted-foreground/50 cursor-not-allowed")}
+          >
+            پاک کردن فیلتر تاریخ
+          </button>
+        </div>
+      </Card>
       {shown.length === 0 ? <EmptyState icon={<CheckCircle2 size={28} />} title="وظیفه‌ای نیست" description="با فیلتر فعلی هیچ وظیفه‌ای پیدا نشد." /> : (
         <div className="space-y-3">
           {shown.map((t) => (
