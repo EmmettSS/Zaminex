@@ -340,9 +340,17 @@ class ProtectedMediaTests(TestCase):
         resp = self.client.get(f"/media/{self.rel_path}")
         self.assertEqual(resp.status_code, 403)
 
-    def test_other_consultant_cannot_download(self):
+    def test_other_consultant_can_view_property_image(self):
+        # Consultants browse all properties via the "همه املاک" tab
+        # (scope=all), so they must also be able to load every property's
+        # images even when they do not own the property.
         self.client.force_login(self.other)
         resp = self.client.get(f"/media/{self.rel_path}")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_unreferenced_file_under_properties_is_denied(self):
+        self.client.force_login(self.other)
+        resp = self.client.get("/media/properties/images/not-in-db.png")
         self.assertEqual(resp.status_code, 403)
 
     def test_owner_and_admin_can_download(self):
