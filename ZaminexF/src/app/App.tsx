@@ -36,6 +36,7 @@ import { AddConsultantPage } from "../features/consultants/components/AddConsult
 import { EditConsultantPage } from "../features/consultants/components/EditConsultantPage";
 import { FollowUpsPage } from "../features/followups/pages/FollowUpsPage";
 import { CreateFollowUp } from "../features/followups/components/CreateFollowUp";
+import { TicketsPage } from "../features/tickets/pages/TicketsPage";
 import { MyProfilePage } from "../features/profile/pages/MyProfilePage";
 import { MyPropertiesPage, AllPropertiesPage } from "../features/properties/pages/MyPropertiesPage";
 import { MyTasksPage } from "../features/tasks/pages/MyTasksPage";
@@ -189,6 +190,8 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   const [recentActivities, setRecentActivities] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [ticketUnreadCount, setTicketUnreadCount] = useState(0);
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
 
   // ── UI state ─────────────────────────────────────────────────────────
   const [collapsed, setCollapsed] = useState(false);
@@ -218,6 +221,10 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
         if (paramId) {
           setSelectedFollowupId(String(paramId));
         }
+      } else if (p === "tickets-sent" || p === "tickets-received" || p === "tickets-all") {
+        setSelectedTicketId(paramId ? String(paramId) : null);
+      } else if (p === "create-ticket") {
+        setSelectedTicketId(null);
       } else if (p === "consultants") {
         setSelectedConsultantId(paramId ? String(paramId) : null);
       } else if (p === "edit-consultant") {
@@ -334,14 +341,31 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     }
   }, [initialData.csrfToken]);
 
+  const fetchTicketUnreadCount = useCallback(async () => {
+    try {
+      const res = await apiFetch("/tickets/api/unread-count/", { method: "GET" }, initialData.csrfToken);
+      if (res.ok) {
+        const data = await res.json();
+        setTicketUnreadCount(Number(data?.count || 0));
+      }
+    } catch (err) {
+      console.error("Error fetching ticket unread count:", err);
+    }
+  }, [initialData.csrfToken]);
+
   useEffect(() => {
     if (isAuthenticated) {
       fetchNotifications();
-      // Refresh every 30 seconds
-      const interval = setInterval(fetchNotifications, 30000);
+      fetchTicketUnreadCount();
+      // Refresh every 30 seconds so new tickets/replies surface in both the
+      // bell and the sidebar without requiring a full-page reload.
+      const interval = setInterval(() => {
+        fetchNotifications();
+        fetchTicketUnreadCount();
+      }, 30000);
       return () => clearInterval(interval);
     }
-  }, [isAuthenticated, fetchNotifications]);
+  }, [isAuthenticated, fetchNotifications, fetchTicketUnreadCount]);
 
   // ── Listings API integration ────────────────────────────────────────
   const fetchListings = useCallback(async () => {
@@ -1685,6 +1709,21 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
           />
         );
       }
+      case "tickets-sent":
+      case "tickets-received":
+      case "tickets-all":
+      case "create-ticket":
+        return (
+          <TicketsPage
+            page={page}
+            role={role}
+            navigate={navigate}
+            csrfToken={initialData.csrfToken}
+            currentUserId={currentConsultantId}
+            initialTicketId={selectedTicketId}
+            onUnreadChanged={fetchTicketUnreadCount}
+          />
+        );
       case "activity": return <ActivityLogPage csrfToken={initialData.csrfToken} />;
       case "manage-attributes": return <AttributesPage csrfToken={initialData.csrfToken} />;
       case "manage-districts": return <DistrictsPage csrfToken={initialData.csrfToken} onDistrictsChanged={() => {
@@ -1837,13 +1876,13 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      <Sidebar role={role} page={page} navigate={navigate} collapsed={collapsed} setCollapsed={setCollapsed} userName={userName} userImageUrl={currentUserImageUrl} onLogout={() => setLogoutConfirm(true)} />
+      <Sidebar role={role} page={page} navigate={navigate} collapsed={collapsed} setCollapsed={setCollapsed} userName={userName} userImageUrl={currentUserImageUrl} ticketUnreadCount={ticketUnreadCount} onLogout={() => setLogoutConfirm(true)} />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <TopBar userName={userName} userImageUrl={currentUserImageUrl} role={role} onCmd={() => setCmdOpen(true)} onNotif={() => setNotifOpen((p) => !p)} notifOpen={notifOpen} unreadCount={unreadCount} />
         <main className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>{renderPage()}</main>
       </div>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} navigate={navigate} role={role} />
-      <NotifDrawer open={notifOpen} onClose={() => setNotifOpen(false)} notifications={notifications} csrfToken={initialData.csrfToken} />
+      <NotifDrawer open={notifOpen} onClose={() => setNotifOpen(false)} notifications={notifications} csrfToken={initialData.csrfToken} onOpenTicket={(id, folder) => navigate(folder === "sent" ? "tickets-sent" : "tickets-received", id)} />
       <ConfirmModal open={logoutConfirm} title="خروج از حساب؟" message="به صفحه ورود بازگردانده می‌شوید." onConfirm={handleLogout} onCancel={() => setLogoutConfirm(false)} />
       <ToastContainer />
     </div>

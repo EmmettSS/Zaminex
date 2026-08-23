@@ -12,6 +12,7 @@ type Page =
   | "tasks-kanban" | "tasks-calendar" | "create-task"
   | "consultants" | "add-consultant" | "edit-consultant"
   | "follow-ups" | "create-followup" | "edit-followup"
+  | "tickets-sent" | "tickets-received" | "tickets-all" | "create-ticket"
   | "property-reports"
   | "activity"
   | "settings-workspace" | "settings-users" | "settings-permissions" | "manage-districts" | "districts" | "manage-attributes"
@@ -128,6 +129,82 @@ type Property = {
 };
 
 type BadgeV = "default" | "success" | "warning" | "danger" | "info" | "purple" | "muted" | "teal";
+
+type TicketSubjectType = "PROPERTY" | "LISTING" | "FOLLOWUP" | "TASK" | "TICKET";
+type TicketType = "QUESTION" | "REQUEST" | "ALERT" | "ISSUE" | "COMPLAINT" | "ANNOUNCEMENT" | "OTHER";
+type TicketPriority = "NORMAL" | "IMPORTANT" | "URGENT";
+type TicketStatus = "OPEN" | "WAITING_REPLY" | "ANSWERED" | "CLOSED";
+
+type TicketUser = {
+  id: string | number;
+  username: string;
+  name: string;
+  email?: string;
+  role?: string;
+};
+
+type TicketSubject = {
+  type: TicketSubjectType;
+  typeLabel: string;
+  id: string | number | null;
+  label: string;
+  restricted?: boolean;
+  title?: string;
+  internalCode?: string;
+  ticketNumber?: string;
+};
+
+type TicketAttachment = {
+  id: string | number;
+  originalName: string;
+  contentType?: string;
+  size: number;
+  downloadUrl: string;
+  createdAt: string;
+};
+
+type TicketMessage = {
+  id: string | number;
+  body: string;
+  sender: TicketUser | null;
+  threadRecipient?: TicketUser | null;
+  attachments: TicketAttachment[];
+  createdAt: string;
+  isInitial?: boolean;
+};
+
+type TicketRow = {
+  id: string | number;
+  ticketNumber: string;
+  title: string;
+  ticketType: TicketType;
+  ticketTypeLabel: string;
+  priority: TicketPriority;
+  priorityLabel: string;
+  status: TicketStatus;
+  statusLabel: string;
+  subjectType: TicketSubjectType;
+  subjectTypeLabel: string;
+  subjectId: string | number | null;
+  subject: TicketSubject;
+  createdBy: TicketUser | null;
+  recipients: TicketUser[];
+  tags: string[];
+  hasReply: boolean;
+  replyCount: number;
+  lastMessageAt: string | null;
+  lastMessageSender: TicketUser | null;
+  createdAt: string;
+  updatedAt: string;
+  slaDueAt: string | null;
+  isOverdue: boolean;
+  isRead: boolean;
+  isUnread: boolean;
+  needsResponse: boolean;
+  waitingForLabel: string;
+};
+
+type TicketDetail = TicketRow & { messages: TicketMessage[] };
 
 type Listing = {
   id: string | number;
@@ -282,4 +359,6 @@ export type {
   FollowUp, FollowUpCreatePayload, BadgeV, PropertyReportPayload, Property,
   Listing, NavSection, ActivityLogItem, ConsultantRole, AddConsultantFormState,
   ConsultantOption, ConsultantAnalyticsPayload, PropertiesPageProps, PropertyDetailProps,
+  TicketSubjectType, TicketType, TicketPriority, TicketStatus, TicketUser,
+  TicketSubject, TicketAttachment, TicketMessage, TicketRow, TicketDetail,
 };
