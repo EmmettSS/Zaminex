@@ -296,7 +296,8 @@ function TicketCreateForm({
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [tagsInput, setTagsInput] = useState("");
-  const [slaDueAt, setSlaDueAt] = useState("");
+  const [slaDueDate, setSlaDueDate] = useState("");
+  const [slaDueTime, setSlaDueTime] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -348,7 +349,13 @@ function TicketCreateForm({
     formData.append("message", message.trim());
     const tags = tagsInput.split(",").map((item) => item.trim()).filter(Boolean);
     if (tags.length) formData.append("tags", JSON.stringify(tags));
-    if (slaDueAt) formData.append("slaDueAt", new Date(slaDueAt).toISOString());
+    if (slaDueDate) {
+      const timePart = slaDueTime.trim() ? slaDueTime.trim() : "23:59";
+      const dt = new Date(`${slaDueDate}T${timePart}`);
+      if (!Number.isNaN(dt.getTime())) {
+        formData.append("slaDueAt", dt.toISOString());
+      }
+    }
     files.forEach((file) => formData.append("attachments", file));
 
     setSubmitting(true);
@@ -386,9 +393,20 @@ function TicketCreateForm({
         <RemoteSubjectSelect type={subjectType} value={subjectId} onChange={setSubjectId} csrfToken={csrfToken} />
         <RemoteRecipientPicker values={recipientIds} onChange={setRecipientIds} csrfToken={csrfToken} />
         <Input label="متن پیام" value={message} onChange={setMessage} textarea rows={7} placeholder="متن تیکت را بنویسید…" required />
+        <Input label="برچسب‌ها" value={tagsInput} onChange={setTagsInput} placeholder="مثلاً آگهی، فوری (با ویرگول جدا کنید)" />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Input label="برچسب‌ها" value={tagsInput} onChange={setTagsInput} placeholder="مثلاً آگهی، فوری (با ویرگول جدا کنید)" />
-          <Input label="مهلت پاسخ سفارشی (اختیاری)" type="datetime-local" value={slaDueAt} onChange={setSlaDueAt} />
+          <JalaliDateInput
+            label="مهلت پاسخ سفارشی (تاریخ)"
+            value={slaDueDate}
+            onChange={setSlaDueDate}
+            placeholder="انتخاب تاریخ مهلت پاسخ…"
+          />
+          <Input
+            label="مهلت پاسخ سفارشی (ساعت)"
+            type="time"
+            value={slaDueTime}
+            onChange={setSlaDueTime}
+          />
         </div>
         <div className="rounded-xl border border-dashed border-border bg-secondary/40 p-4">
           <div className="flex items-center gap-2 mb-2">
