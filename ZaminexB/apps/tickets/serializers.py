@@ -34,6 +34,116 @@ from .models import (
 User = get_user_model()
 
 
+def _parse_form_list(values):
+    """Return a flat list from JSON, repeated, or comma-separated form values.
+
+    ``QueryDict`` stores a value assigned with ``data["field"] = [..]`` as one
+    item whose value is itself a list.  DRF then hands that nested value to a
+    ``ListField`` child (for example an ``IntegerField``), which is the source
+    of the misleading "valid number" error raised by the ticket form.
+
+    This helper deliberately works with values obtained via ``getlist`` and
+    returns an ordinary Python list.  It therefore supports browser FormData
+    (`[4, 7]` as JSON), repeated form keys, and the comma-separated format used
+    by a few older clients without mutating the incoming QueryDict.
+    """
+
+    parsed_values = []
+    for value in values:
+        # Native JSON requests already contain lists.  Unpack only this outer
+        # list; a deliberately malformed deeper list is left to DRF's child
+        # field validation instead of being silently coerced.
+        if isinstance(value, (list, tuple)):
+            parsed_values.extend(value)
+            continue
+        if not isinstance(value, str):
+            parsed_values.append(value)
+            continue
+
+        text = value.strip()
+        if not text:
+            continue
+        try:
+            decoded = json.loads(text)
+        except (TypeError, ValueError):
+            # FormData has no native array primitive.  Supporting repeated
+            # values above and comma-separated values here makes a one-item
+            # recipient/tag input behave as a list as well.
+            parsed_values.extend(
+                part.strip() for part in text.split(",") if part.strip()
+            )
+        else:
+            if isinstance(decoded, list):
+                parsed_values.extend(decoded)
+            else:
+                parsed_values.append(decoded)
+    return parsed_values
+
+
+def _as_file_list(value):
+    """Keep repeated multipart files as an ordinary list of UploadedFiles."""
+
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
+
+def _normalise_request_data(data, *, aliases, list_fields, file_fields=()):
+    """Map API aliases and normalise multipart input without changing QueryDict.
+
+    DRF hands multipart input to serializers as a QueryDict.  Assigning a
+    Python list back through ``__setitem__`` nests it in that QueryDict.  Build
+    a fresh, plain dictionary instead, keeping scalar values scalar and
+    obtaining repeated values/files with ``getlist`` before any alias mapping.
+    JSON requests are normal dictionaries and retain the same public aliases.
+    """
+
+    list_fields = set(list_fields)
+    file_fields = set(file_fields)
+
+    if hasattr(data, "getlist"):
+        normalised = {}
+        for source_key in data.keys():
+            target_key = aliases.get(source_key, source_key)
+            # The canonical field takes precedence when a caller sends both
+            # spellings.  This matches the old mapping behaviour while making
+            # the choice deterministic.
+            if source_key in aliases and target_key in data:
+                continue
+
+            if target_key in list_fields:
+                values = data.getlist(source_key)
+                normalised[target_key] = (
+                    _as_file_list(values)
+                    if target_key in file_fields
+                    else _parse_form_list(values)
+                )
+            else:
+                # QueryDict.get returns one scalar (the last submitted value),
+                # exactly what scalar DRF fields expect.
+                normalised[target_key] = data.get(source_key)
+        return normalised
+
+    # JSONParser supplies a normal mapping.  Do not mutate it: serializers can
+    # be reused and callers may hold a reference to request.data.
+    normalised = dict(data)
+    for source_key, target_key in aliases.items():
+        if target_key not in normalised and source_key in normalised:
+            normalised[target_key] = normalised[source_key]
+
+    for key in list_fields:
+        if key not in normalised:
+            continue
+        normalised[key] = (
+            _as_file_list(normalised[key])
+            if key in file_fields
+            else _parse_form_list(_as_file_list(normalised[key]))
+        )
+    return normalised
+
+
 def user_display_name(user) -> str:
     if not user:
         return "سیستم"
@@ -414,38 +524,18 @@ class TicketCreateSerializer(serializers.Serializer):
     )
 
     def to_internal_value(self, data):
-        if hasattr(data, "copy"):
-            data = data.copy()
-
-        aliases = {
-            "ticketType": "ticket_type",
-            "subjectType": "subject_type",
-            "subjectId": "subject_id",
-            "recipientIds": "recipient_ids",
-            "slaDueAt": "sla_due_at",
-        }
-        for old, new in aliases.items():
-            if old in data and new not in data:
-                data[new] = data[old]
-
-        # FormData transports arrays as JSON strings.  QueryDict.getlist keeps
-        # all repeated attachment fields intact.
-        if hasattr(data, "getlist"):
-            files = data.getlist("attachments")
-            if files:
-                if hasattr(data, "setlist"):
-                    data.setlist("attachments", files)
-                else:
-                    data["attachments"] = files
-        for key in ("recipient_ids", "tags", "attachments"):
-            value = data.get(key)
-            if isinstance(value, str) and key in {"recipient_ids", "tags"}:
-                try:
-                    data[key] = json.loads(value)
-                except (TypeError, ValueError):
-                    data[key] = [
-                        part.strip() for part in value.split(",") if part.strip()
-                    ]
+        data = _normalise_request_data(
+            data,
+            aliases={
+                "ticketType": "ticket_type",
+                "subjectType": "subject_type",
+                "subjectId": "subject_id",
+                "recipientIds": "recipient_ids",
+                "slaDueAt": "sla_due_at",
+            },
+            list_fields={"recipient_ids", "tags", "attachments"},
+            file_fields={"attachments"},
+        )
         return super().to_internal_value(data)
 
     def validate(self, attrs):
@@ -541,19 +631,15 @@ class TicketReplySerializer(serializers.Serializer):
     )
 
     def to_internal_value(self, data):
-        if hasattr(data, "copy"):
-            data = data.copy()
-        if "message" not in data and "body" in data:
-            data["message"] = data["body"]
-        if "threadRecipientId" in data and "thread_recipient_id" not in data:
-            data["thread_recipient_id"] = data["threadRecipientId"]
-        if hasattr(data, "getlist"):
-            files = data.getlist("attachments")
-            if files:
-                if hasattr(data, "setlist"):
-                    data.setlist("attachments", files)
-                else:
-                    data["attachments"] = files
+        data = _normalise_request_data(
+            data,
+            aliases={
+                "body": "message",
+                "threadRecipientId": "thread_recipient_id",
+            },
+            list_fields={"attachments"},
+            file_fields={"attachments"},
+        )
         return super().to_internal_value(data)
 
     def validate(self, attrs):
