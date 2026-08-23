@@ -1,6 +1,9 @@
+import os
+import uuid
+
 from django.db import models
 
-from .validators import validate_property_image
+from .validators import validate_appraisal_pdf, validate_property_image
 from django.conf import settings
 
 from apps.common.attribute_values import BaseAttributeValue
@@ -289,3 +292,71 @@ class PropertyImage(models.Model):
 
     def __str__(self):
         return f"{self.property.title} - Image {self.pk}"
+
+
+def appraisal_report_upload_path(instance, filename):
+    """Storage path for an appraisal PDF.
+
+    The stored name is random and URL-safe (Persian/space-laden original
+    names cause needless trouble on filesystems and in URLs); the
+    user-facing name is preserved in ``original_filename`` and used for the
+    download's Content-Disposition instead.
+    """
+    ext = os.path.splitext(filename)[1].lower()
+    if ext != ".pdf":
+        ext = ".pdf"
+    return f"properties/appraisals/{instance.property_id}/{uuid.uuid4().hex}{ext}"
+
+
+class PropertyAppraisalReport(models.Model):
+    """The single PDF appraisal report (گزارش کارشناسی) attached to a property.
+
+    One report per property — the OneToOneField enforces that at the
+    database level. Uploading again replaces the previous row and its file
+    (see ``PropertyViewSet.appraisal_report``), so exactly one PDF exists at
+    any time and no orphaned files are left behind.
+    """
+
+    property = models.OneToOneField(
+        "properties.Property",
+        on_delete=models.CASCADE,
+        related_name="appraisal_report",
+        verbose_name="ملک",
+    )
+    file = models.FileField(
+        upload_to=appraisal_report_upload_path,
+        validators=[validate_appraisal_pdf],
+        verbose_name="فایل گزارش کارشناسی",
+        help_text="فقط فایل PDF، حداکثر ۱۰ مگابایت.",
+    )
+    # Kept apart from the stored path so downloads keep the name the
+    # consultant chose, while storage stays URL-safe.
+    original_filename = models.CharField(max_length=255, verbose_name="نام اصلی فایل")
+    file_size = models.PositiveIntegerField(verbose_name="حجم فایل (بایت)")
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_appraisal_reports",
+        verbose_name="بارگذاری‌کننده",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ ایجاد")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاریخ بروزرسانی")
+
+    class Meta:
+        verbose_name = "گزارش کارشناسی ملک"
+        verbose_name_plural = "گزارش‌های کارشناسی ملک"
+
+    def __str__(self):
+        return f"{self.property.title} - {self.original_filename}"
+
+    def delete(self, *args, **kwargs):
+        # Remove the row first, then the stored PDF: if the database delete
+        # fails the file is left untouched (no dangling row), while a failed
+        # file delete can at worst leave an orphan on disk. FileSystemStorage
+        # treats a missing file as a no-op, so this never raises on re-runs.
+        pk = self.pk
+        super().delete(*args, **kwargs)
+        if pk is not None:
+            self.file.delete(save=False)

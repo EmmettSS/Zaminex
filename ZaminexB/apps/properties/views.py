@@ -4,7 +4,9 @@ from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Q
+from django.http import FileResponse
 from django.middleware.csrf import get_token
 from django.views.decorators.csrf import ensure_csrf_cookie
 
@@ -14,17 +16,21 @@ from apps.common.fuzzy_search import apply_fuzzy_search
 from apps.common.metrics import annotate_effective_prices, effective_sale_price as _sale_price
 
 from .permissions import consultant_required
-from .models import Property, PropertyImage
+from .models import Property, PropertyAppraisalReport, PropertyImage
 
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
-from apps.common.access import can_manage_property
-from .validators import validate_property_image
+from apps.common.access import can_access_property, can_manage_property
+from .validators import validate_appraisal_pdf, validate_property_image
 
-from .serializers import PropertySerializer, PropertyImageSerializer
+from .serializers import (
+    PropertyAppraisalReportSerializer,
+    PropertyImageSerializer,
+    PropertySerializer,
+)
 from apps.common.pagination import StandardResultsSetPagination
 
 
@@ -43,6 +49,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
         #   property_type_ref/usage  → the reference-data labels
         #   district chain           → `locationPath`
         #   attribute_values         → the dynamic attributes
+        #   appraisal_report         → the attached PDF metadata
         qs = (
             Property.objects.select_related(
                 "consultant",
@@ -51,6 +58,8 @@ class PropertyViewSet(viewsets.ModelViewSet):
                 "district",
                 "district__city",
                 "district__city__province",
+                "appraisal_report",
+                "appraisal_report__uploaded_by",
             )
             .prefetch_related(
                 "images",
@@ -333,6 +342,116 @@ class PropertyViewSet(viewsets.ModelViewSet):
             PropertyImageSerializer(images, many=True, context={"request": request}).data
         )
 
+    # -- appraisal report (گزارش کارشناسی) --------------------------------
+    # A property carries at most one PDF appraisal report. Upload and delete
+    # share this endpoint; the file itself is streamed by the separate
+    # `download` action below. Upload/delete rights match the gallery images:
+    # the consultant the property is assigned to (کارشناس ثبت‌کننده /
+    # واگذارشده) or an admin — enforced by `can_manage_property`.
+
+    @action(detail=True, methods=["post", "delete"], url_path="appraisal-report")
+    def appraisal_report(self, request, pk=None):
+        if request.method == "POST":
+            return self._upload_appraisal_report(request, pk)
+        return self._delete_appraisal_report(request, pk)
+
+    def _upload_appraisal_report(self, request, pk):
+        property_obj = self.get_object()
+        if not can_manage_property(request.user, property_obj):
+            return Response(
+                {"detail": "فقط مالک ملک یا مدیر می‌تواند گزارش کارشناسی را بارگذاری کند."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        f = request.FILES.get("file")
+        if f is None:
+            return Response(
+                {"detail": "هیچ فایلی ارسال نشده است."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            validate_appraisal_pdf(f)
+        except Exception as exc:
+            detail = "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+            return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            # Exactly one report per property: a new upload replaces the
+            # previous row and its file. The instance-level delete() removes
+            # the stored PDF too; the transaction keeps the row consistent
+            # even if that storage cleanup were to fail.
+            existing = PropertyAppraisalReport.objects.filter(
+                property=property_obj
+            ).first()
+            if existing is not None:
+                existing.delete()
+            report = PropertyAppraisalReport.objects.create(
+                property=property_obj,
+                file=f,
+                original_filename=f.name,
+                file_size=f.size,
+                uploaded_by=request.user,
+            )
+        return Response(
+            PropertyAppraisalReportSerializer(report, context={"request": request}).data,
+            status=201,
+        )
+
+    def _delete_appraisal_report(self, request, pk):
+        property_obj = self.get_object()
+        if not can_manage_property(request.user, property_obj):
+            return Response(
+                {"detail": "فقط مالک ملک یا مدیر می‌تواند گزارش کارشناسی را حذف کند."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        report = PropertyAppraisalReport.objects.filter(
+            property=property_obj
+        ).first()
+        if report is None:
+            return Response(
+                {"detail": "گزارش کارشناسی برای این ملک ثبت نشده است."},
+                status=404,
+            )
+        # Instance delete also removes the stored PDF (see the model).
+        report.delete()
+        return Response(status=204)
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="appraisal-report/download",
+        url_name="appraisal-report-download",
+    )
+    def download_appraisal_report(self, request, pk=None):
+        """Stream the appraisal PDF.
+
+        Read access mirrors the gallery images (`can_access_property`):
+        admins, the assigned consultant, and — for shared properties — every
+        consultant. Served as an attachment under the original filename so
+        the download button saves the file; `?inline=1` switches the
+        disposition for the in-tab preview.
+        """
+        property_obj = self.get_object()
+        if not can_access_property(request.user, property_obj):
+            return Response(
+                {"detail": "شما به این فایل دسترسی ندارید."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        report = (
+            PropertyAppraisalReport.objects.filter(property=property_obj).first()
+        )
+        if report is None or not report.file:
+            return Response(
+                {"detail": "گزارش کارشناسی برای این ملک ثبت نشده است."},
+                status=404,
+            )
+        inline = request.query_params.get("inline") in ("1", "true")
+        return FileResponse(
+            report.file.open("rb"),
+            content_type="application/pdf",
+            as_attachment=not inline,
+            filename=report.original_filename or "appraisal-report.pdf",
+        )
+
 
 
 @login_required
@@ -554,6 +673,12 @@ def property_detail(request, pk):
             pk=pk,
         )
 
+    appraisal = (
+        PropertyAppraisalReport.objects.select_related("uploaded_by")
+        .filter(property=property_obj)
+        .first()
+    )
+
     property_data = {
         "id": str(property_obj.id),
         "internalCode": property_obj.internal_code or "",
@@ -592,6 +717,14 @@ def property_detail(request, pk):
             }
             for image in property_obj.images.all()
         ],
+
+        "appraisalReport": (
+            PropertyAppraisalReportSerializer(
+                appraisal, context={"request": request}
+            ).data
+            if appraisal
+            else None
+        ),
     }
 
     initial_data = {

@@ -12,7 +12,7 @@ from apps.basics.models import (
 from apps.common.attribute_serializers import AttributeValuesMixin
 from apps.common.metrics import build_neighborhood_price_stats_map, property_market_metrics
 
-from .models import Property, PropertyAttributeValue, PropertyImage
+from .models import Property, PropertyAppraisalReport, PropertyAttributeValue, PropertyImage
 
 User = get_user_model()
 
@@ -47,6 +47,43 @@ class PropertyImageSerializer(serializers.ModelSerializer):
             url = obj.image.url
             return request.build_absolute_uri(url) if request else url
         return ""
+
+
+class PropertyAppraisalReportSerializer(serializers.ModelSerializer):
+    """Metadata of the (single) appraisal PDF attached to a property.
+
+    `url` points at the authenticated download endpoint rather than the raw
+    media path: it re-checks read access on every request, keeps the
+    consultant's original filename in the Content-Disposition, and works
+    uniformly for the download button and the inline preview.
+    """
+
+    url = serializers.SerializerMethodField()
+    fileName = serializers.CharField(source="original_filename", read_only=True)
+    fileSize = serializers.IntegerField(source="file_size", read_only=True)
+    uploadedBy = serializers.SerializerMethodField()
+    uploadedAt = serializers.DateTimeField(
+        source="created_at", format="%Y-%m-%d %H:%M", read_only=True
+    )
+
+    class Meta:
+        model = PropertyAppraisalReport
+        fields = ["id", "url", "fileName", "fileSize", "uploadedBy", "uploadedAt"]
+
+    def get_url(self, obj):
+        from django.urls import reverse
+
+        url = reverse(
+            "properties:api-properties-appraisal-report-download",
+            kwargs={"pk": obj.property_id},
+        )
+        request = self.context.get("request")
+        return request.build_absolute_uri(url) if request else url
+
+    def get_uploadedBy(self, obj):
+        if not obj.uploaded_by:
+            return None
+        return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
 
 class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
     # --- dynamic attributes (phase 3) --------------------------------------
@@ -153,6 +190,11 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
     consultantRole = serializers.SerializerMethodField()
     date = serializers.DateTimeField(source="created_at", format="%Y-%m-%d", read_only=True)
     images = PropertyImageSerializer(many=True, read_only=True)
+    # Reverse one-to-one: DRF resolves it as None when no report is attached
+    # (see rest_framework.fields.get_attribute).
+    appraisalReport = PropertyAppraisalReportSerializer(
+        source="appraisal_report", read_only=True
+    )
     pricePerSqm = serializers.SerializerMethodField()
     imagesCount = serializers.SerializerMethodField()
     daysOnMarket = serializers.SerializerMethodField()
@@ -169,7 +211,7 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
             "floor", "constructionYear", "fullAddress", "propertyStatus",
             "price", "area", "beds", "district", "consultant", "consultantName",
             "consultantId", "consultantRole",
-            "date", "description", "images", "status",
+            "date", "description", "images", "appraisalReport", "status",
             "pricePerSqm", "imagesCount", "daysOnMarket", "spatialDensityRatio",
             "priceDeviationIndex", "geoPrecisionFlag", "engagementHeatScore", "views",
             "propertyTypeRef", "propertyTypeName", "propertyTypeDisplay",

@@ -18,7 +18,7 @@ from django.http import Http404, HttpResponseForbidden
 from django.views.static import serve
 
 from apps.accounts.models import AdminProfile, ConsultantProfile
-from apps.properties.models import PropertyImage
+from apps.properties.models import PropertyAppraisalReport, PropertyImage
 
 
 def _safe_relative_path(path: str) -> str | None:
@@ -43,6 +43,20 @@ def _can_access_media(user, rel_path: str) -> bool:
     parts = PurePosixPath(rel_path).parts
     if not parts:
         return False
+    # Appraisal PDFs live under properties/appraisals/… and are tracked by
+    # PropertyAppraisalReport. Read access mirrors the property images below:
+    # the assigned consultant, or anyone when the property is shared.
+    if parts[0] == "properties" and len(parts) > 1 and parts[1] == "appraisals":
+        report = (
+            PropertyAppraisalReport.objects.select_related("property")
+            .filter(file=rel_path)
+            .only("property__consultant_id", "property__is_shared")
+            .first()
+        )
+        if report is None:
+            return False
+        prop = report.property
+        return bool(prop and (prop.consultant_id == user.pk or prop.is_shared))
     # Property images: the consultant who owns the property, or anyone if
     # the property is shared.
     if parts[0] == "properties":
