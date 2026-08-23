@@ -1,4 +1,5 @@
 import datetime
+import json
 import tempfile
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -8,7 +9,13 @@ from rest_framework.test import APIClient
 from apps.accounts.models import UserRole
 from apps.tasks.models import Task
 
-from .models import Ticket, TicketAuditAction
+from .models import (
+    Ticket,
+    TicketAttachment,
+    TicketAuditAction,
+    TicketMessage,
+    TicketParticipantRole,
+)
 
 
 User = get_user_model()
@@ -78,6 +85,128 @@ class TicketSecurityTests(TestCase):
             },
             format="json",
         )
+
+    def _multipart_ticket_payload(self, **overrides):
+        """Mirror the browser FormData payload (including JSON array strings)."""
+
+        payload = {
+            "ticketType": "REQUEST",
+            "priority": "NORMAL",
+            "subjectType": "TASK",
+            "subjectId": str(self.task.id),
+            "recipientIds": json.dumps([self.recipient.id]),
+            "message": "لطفاً این وظیفه را بررسی کنید.",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_multipart_create_accepts_browser_json_recipient_ids_and_string_subject_id(self):
+        self._auth(self.owner)
+        response = self.client.post(
+            "/tickets/api/tickets/",
+            self._multipart_ticket_payload(),
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201, response.json())
+        ticket = Ticket.objects.get(pk=response.json()["id"])
+        self.assertEqual(ticket.subject_id, self.task.id)
+        self.assertEqual(ticket.messages.count(), 1)
+        self.assertEqual(
+            ticket.participants.filter(role=TicketParticipantRole.RECIPIENT).count(), 1
+        )
+        self.assertTrue(
+            ticket.participants.filter(
+                role=TicketParticipantRole.RECIPIENT, user=self.recipient
+            ).exists()
+        )
+
+    def test_multipart_create_accepts_multiple_json_recipients_without_nesting(self):
+        self._auth(self.owner)
+        recipient_ids = [self.recipient.id, self.other_recipient.id]
+        response = self.client.post(
+            "/tickets/api/tickets/",
+            self._multipart_ticket_payload(recipientIds=json.dumps(recipient_ids)),
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201, response.json())
+        ticket = Ticket.objects.get(pk=response.json()["id"])
+        self.assertSetEqual(
+            set(
+                ticket.participants.filter(
+                    role=TicketParticipantRole.RECIPIENT
+                ).values_list("user_id", flat=True)
+            ),
+            set(recipient_ids),
+        )
+
+    def test_multipart_create_accepts_repeated_recipient_fields(self):
+        self._auth(self.owner)
+        recipient_ids = [self.recipient.id, self.other_recipient.id]
+        response = self.client.post(
+            "/tickets/api/tickets/",
+            self._multipart_ticket_payload(
+                recipientIds=[str(recipient_id) for recipient_id in recipient_ids]
+            ),
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201, response.json())
+        self.assertEqual(
+            Ticket.objects.get(pk=response.json()["id"])
+            .participants.filter(role=TicketParticipantRole.RECIPIENT)
+            .count(),
+            len(recipient_ids),
+        )
+
+    def test_multipart_create_accepts_json_tags(self):
+        self._auth(self.owner)
+        tags = ["فوری", "بررسی"]
+        response = self.client.post(
+            "/tickets/api/tickets/",
+            self._multipart_ticket_payload(tags=json.dumps(tags)),
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201, response.json())
+        self.assertEqual(Ticket.objects.get(pk=response.json()["id"]).tags, tags)
+
+    def test_json_create_accepts_native_recipient_and_tag_lists(self):
+        self._auth(self.owner)
+        tags = ["فوری", "بررسی"]
+        response = self.client.post(
+            "/tickets/api/tickets/",
+            {
+                "ticketType": "REQUEST",
+                "priority": "NORMAL",
+                "subjectType": "TASK",
+                "subjectId": self.task.id,
+                "recipientIds": [self.recipient.id, self.other_recipient.id],
+                "message": "ثبت تیکت از JSON.",
+                "tags": tags,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.json())
+        ticket = Ticket.objects.get(pk=response.json()["id"])
+        self.assertEqual(ticket.tags, tags)
+        self.assertEqual(
+            ticket.participants.filter(role=TicketParticipantRole.RECIPIENT).count(), 2
+        )
+
+    def test_multipart_validation_errors_remain_field_specific(self):
+        self._auth(self.owner)
+        response = self.client.post(
+            "/tickets/api/tickets/",
+            {"ticketType": "REQUEST", "subjectType": "TASK", "message": "ناقص"},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400, response.json())
+        self.assertIn("subject_id", response.json())
+        self.assertIn("recipient_ids", response.json())
 
     def test_agent_cannot_create_ticket_about_another_agents_task(self):
         response = self._create_ticket(subject_id=self.other_task.id)
@@ -187,26 +316,33 @@ class TicketSecurityTests(TestCase):
         self.assertEqual(export.status_code, 200)
         self.assertIn("TKT-", export.content.decode("utf-8-sig"))
 
-    def test_safe_pdf_attachment_is_stored_and_returned_as_download(self):
+    def test_safe_pdf_attachments_are_stored_and_returned_only_to_participants(self):
         self._auth(self.owner)
         response = self.client.post(
             "/tickets/api/tickets/",
-            {
-                "ticketType": "ISSUE",
-                "subjectType": "TASK",
-                "subjectId": self.task.id,
-                "recipientIds": [self.recipient.id],
-                "message": "با سند پیوست بررسی شود.",
-                "attachments": SimpleUploadedFile(
-                    "evidence.pdf",
-                    b"%PDF-1.7\nbody",
-                    content_type="application/pdf",
-                ),
-            },
+            self._multipart_ticket_payload(
+                ticketType="ISSUE",
+                attachments=[
+                    SimpleUploadedFile(
+                        "evidence.pdf",
+                        b"%PDF-1.7\nbody",
+                        content_type="application/pdf",
+                    ),
+                    SimpleUploadedFile(
+                        "second-evidence.pdf",
+                        b"%PDF-1.7\nsecond body",
+                        content_type="application/pdf",
+                    ),
+                ],
+            ),
             format="multipart",
         )
-        self.assertEqual(response.status_code, 201, response.content)
-        attachment_id = response.json()["messages"][0]["attachments"][0]["id"]
+        self.assertEqual(response.status_code, 201, response.json())
+        attachments = response.json()["messages"][0]["attachments"]
+        self.assertEqual(len(attachments), 2)
+        attachment_id = attachments[0]["id"]
+        self.assertTrue(TicketAttachment.objects.filter(pk=attachment_id).exists())
+
         self._auth(self.recipient)
         download = self.client.get(
             f"/tickets/api/attachments/{attachment_id}/download/"
@@ -216,20 +352,63 @@ class TicketSecurityTests(TestCase):
         payload = b"".join(download.streaming_content)
         self.assertEqual(payload[:5], b"%PDF-")
 
-    def test_rejects_fake_attachment_extension(self):
+        self._auth(self.stranger)
+        forbidden_download = self.client.get(
+            f"/tickets/api/attachments/{attachment_id}/download/"
+        )
+        self.assertEqual(forbidden_download.status_code, 404)
+
+    def test_rejects_fake_attachment_extension_and_rolls_back_everything(self):
         self._auth(self.owner)
         response = self.client.post(
             "/tickets/api/tickets/",
-            {
-                "subjectType": "TASK",
-                "subjectId": self.task.id,
-                "recipientIds": [self.recipient.id],
-                "message": "فایل نامعتبر.",
-                "attachments": SimpleUploadedFile(
+            self._multipart_ticket_payload(
+                message="فایل نامعتبر.",
+                attachments=SimpleUploadedFile(
                     "fake.pdf", b"not a pdf", content_type="application/pdf"
+                ),
+            ),
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 400, response.json())
+        self.assertEqual(Ticket.objects.count(), 0)
+        self.assertEqual(TicketMessage.objects.count(), 0)
+        self.assertEqual(TicketAttachment.objects.count(), 0)
+
+    def test_reply_accepts_multipart_text_and_attachment(self):
+        created = self._create_ticket()
+        self.assertEqual(created.status_code, 201, created.json())
+        ticket_id = created.json()["id"]
+        self._auth(self.recipient)
+
+        text_reply = self.client.post(
+            f"/tickets/api/tickets/{ticket_id}/reply/",
+            {"message": "پاسخ متنی multipart"},
+            format="multipart",
+        )
+        self.assertEqual(text_reply.status_code, 200, text_reply.json())
+        self.assertEqual(TicketMessage.objects.filter(ticket_id=ticket_id).count(), 2)
+        self.assertEqual(
+            TicketMessage.objects.get(ticket_id=ticket_id, is_initial=False).body,
+            "پاسخ متنی multipart",
+        )
+
+        attachment_reply = self.client.post(
+            f"/tickets/api/tickets/{ticket_id}/reply/",
+            {
+                "message": "پاسخ همراه فایل",
+                "attachments": SimpleUploadedFile(
+                    "reply.pdf",
+                    b"%PDF-1.7\nreply",
+                    content_type="application/pdf",
                 ),
             },
             format="multipart",
         )
-        self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(Ticket.objects.count(), 0)
+        self.assertEqual(attachment_reply.status_code, 200, attachment_reply.json())
+        reply_message = TicketMessage.objects.filter(
+            ticket_id=ticket_id, is_initial=False
+        ).order_by("-id").first()
+        self.assertEqual(reply_message.body, "پاسخ همراه فایل")
+        self.assertEqual(reply_message.attachments.count(), 1)
+        self.assertEqual(reply_message.attachments.first().original_name, "reply.pdf")
