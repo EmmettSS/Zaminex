@@ -15,6 +15,7 @@ urlpatterns = [
     path("listings/", include("apps.listings.urls")),
     path("followupa/api/", include("apps.followups.urls")),
     path("tasks/api/", include("apps.tasks.urls")),
+    path("tickets/api/", include("apps.tickets.urls")),
     path("common/api/", include("apps.common.urls")),
     path("basics/api/", include("apps.basics.urls")),
     path("", include("apps.reports.urls")),

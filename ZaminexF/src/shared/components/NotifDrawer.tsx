@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { cx } from "../lib/utils";
 import { BadgeV } from "../lib/types";
-import { ChevronLeft, ChevronRight, ChevronDown, Check, X, Archive, Trash2, Download, RefreshCw, Clock, Building2, Eye, Edit2, CheckCircle2, MoreVertical, MapPin, User, Lock, Key, Send, Loader2, Shield, Filter, Plus, CheckSquare, BellRing, LayoutDashboard, FileText, Users, Activity, Settings, LogOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Check, X, Archive, Trash2, Download, RefreshCw, Clock, Building2, Eye, Edit2, CheckCircle2, MoreVertical, MapPin, User, Lock, Key, Send, Loader2, Shield, Filter, Plus, CheckSquare, BellRing, LayoutDashboard, FileText, Users, Activity, MessageSquare, Settings, LogOut } from "lucide-react";
 import { Badge } from "./ui/Badge";
 import { Btn } from "./ui/Btn";
 import { Card } from "./ui/Card";
@@ -14,7 +14,7 @@ import { EmptyState } from "./ui/EmptyState";
 import { toast } from "../lib/utils";
 import { createPortal } from "react-dom";
 import { apiFetch } from "../lib/apiClient";
-function NotifDrawer({ open, onClose, notifications = [], csrfToken }: { open: boolean; onClose: () => void; notifications?: any[]; csrfToken?: string }) {
+function NotifDrawer({ open, onClose, notifications = [], csrfToken, onOpenTicket }: { open: boolean; onClose: () => void; notifications?: any[]; csrfToken?: string; onOpenTicket?: (ticketId: string, folder?: "sent" | "received") => void }) {
   const handleMarkRead = async (notifId: number) => {
     try {
       await apiFetch(`/common/api/notifications/${notifId}/read/`, { method: "POST" }, csrfToken);
@@ -34,6 +34,9 @@ function NotifDrawer({ open, onClose, notifications = [], csrfToken }: { open: b
     property_assigned: "bg-purple-100 text-purple-600",
     listing_approved: "bg-emerald-100 text-emerald-600",
     listing_rejected: "bg-red-100 text-red-600",
+    ticket_created: "bg-violet-100 text-violet-600",
+    ticket_reply: "bg-blue-100 text-blue-600",
+    ticket_status_changed: "bg-amber-100 text-amber-600",
   };
   
   const getIcon = (type: string) => {
@@ -44,6 +47,7 @@ function NotifDrawer({ open, onClose, notifications = [], csrfToken }: { open: b
       case "followup_created": return <BellRing size={13} />;
       case "property_assigned": return <Building2 size={13} />;
       case "listing_approved": case "listing_rejected": return <FileText size={13} />;
+      case "ticket_created": case "ticket_reply": case "ticket_status_changed": return <MessageSquare size={13} />;
       default: return <Settings size={13} />;
     }
   };
@@ -65,7 +69,11 @@ function NotifDrawer({ open, onClose, notifications = [], csrfToken }: { open: b
               <div 
                 key={n.id} 
                 className={cx("flex items-start gap-3 px-4 py-3.5 cursor-pointer hover:bg-secondary/50 transition-colors", !n.isRead && "bg-primary/[0.03]")}
-                onClick={() => handleMarkRead(n.id)}
+                onClick={() => {
+                  void handleMarkRead(n.id);
+                  const ticketId = n.metadata?.ticketId || n.metadata?.ticket_id;
+                  if (ticketId && onOpenTicket) onOpenTicket(String(ticketId), n.metadata?.ticketFolder === "sent" ? "sent" : "received");
+                }}
               >
                 <div className={cx("w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5", cm[n.type] || "bg-secondary text-muted-foreground")}>
                   {getIcon(n.type)}

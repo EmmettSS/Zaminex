@@ -37,6 +37,7 @@ class ActivityLog(models.Model):
         LISTING = "listing", "آگهی"
         TASK = "task", "وظیفه"
         FOLLOWUP = "followup", "پیگیری"
+        TICKET = "ticket", "تیکت"
         CONSULTANT = "consultant", "مشاور"
         SYSTEM = "system", "سیستم"
 
@@ -210,6 +211,9 @@ class Notification(models.Model):
         PROPERTY_ASSIGNED = 'property_assigned', 'ملک جدید'
         LISTING_APPROVED = 'listing_approved', 'تایید آگهی'
         LISTING_REJECTED = 'listing_rejected', 'رد آگهی'
+        TICKET_CREATED = 'ticket_created', 'تیکت جدید'
+        TICKET_REPLY = 'ticket_reply', 'پاسخ جدید تیکت'
+        TICKET_STATUS_CHANGED = 'ticket_status_changed', 'تغییر وضعیت تیکت'
     
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

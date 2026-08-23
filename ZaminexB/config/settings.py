@@ -78,6 +78,7 @@ INSTALLED_APPS = [
     'apps.properties.apps.PropertiesConfig',
     'apps.tasks.apps.TasksConfig',
     'apps.followups.apps.FollowupsConfig',
+    'apps.tickets.apps.TicketsConfig',
     'apps.reports.apps.ReportsConfig',
     'rest_framework',
 ]

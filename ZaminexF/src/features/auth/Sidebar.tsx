@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { cx } from "../../shared/lib/utils";
 import { BadgeV } from "../../shared/lib/types";
-import { LayoutDashboard, MapPin, SlidersHorizontal, Building2, FileText, CheckSquare, BellRing, Calendar, Users, User, Activity, Settings, LogOut, Zap, Plus, ArrowUpRight, Lock, Mail, Search, Command, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
+import { LayoutDashboard, MapPin, SlidersHorizontal, Building2, FileText, CheckSquare, BellRing, Calendar, Users, User, Activity, MessageSquare, Settings, LogOut, Zap, Plus, ArrowUpRight, Lock, Mail, Search, Command, ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import { Badge } from "../../shared/components/ui/Badge";
 import { Btn } from "../../shared/components/ui/Btn";
 import { Input } from "../../shared/components/ui/Input";
@@ -13,12 +13,12 @@ import { ConfirmModal } from "../../shared/components/ConfirmModal";
 import { toast } from "../../shared/lib/utils";
 import { PasswordResetModal } from "../../shared/components/PasswordResetModal";
 import { Page, Role, NavSection } from "../../shared/lib/types";
-function Sidebar({ role, page, navigate, collapsed, setCollapsed, userName, userImageUrl, onLogout }: {
-  role: Role; page: Page; navigate: (p: Page) => void; collapsed: boolean; setCollapsed: (v: boolean) => void; userName: string; userImageUrl?: string | null; onLogout: () => void;
+function Sidebar({ role, page, navigate, collapsed, setCollapsed, userName, userImageUrl, onLogout, ticketUnreadCount = 0 }: {
+  role: Role; page: Page; navigate: (p: Page) => void; collapsed: boolean; setCollapsed: (v: boolean) => void; userName: string; userImageUrl?: string | null; onLogout: () => void; ticketUnreadCount?: number;
 }) {
   const adminSections: NavSection[] = [
     { items: [{ label: "داشبورد", icon: <LayoutDashboard size={16} />, page: "admin-dashboard" }, { label: "املاک", icon: <Building2 size={16} />, children: [{ label: "همه املاک", page: "properties" }, { label: "افزودن ملک", page: "add-property" }] }, { label: "آگهی‌ها", icon: <FileText size={16} />, children: [{ label: "همه آگهی‌ها", page: "listings" }, { label: "ساخت آگهی", page: "create-listing" }] }] },
-    { heading: "عملیات", items: [{ label: "وظایف", icon: <CheckSquare size={16} />, children: [{ label: "تخته کانبان", page: "tasks-kanban" }, { label: "افزودن وظیفه", page: "create-task" }] }, { label: "پیگیری‌ها", icon: <BellRing size={16} />, children: [{ label: "فهرست", page: "follow-ups" }, { label: "ایجاد", page: "create-followup" }] }, { label: "تقویم", icon: <Calendar size={16} />, page: "tasks-calendar" }] },
+    { heading: "عملیات", items: [{ label: "وظایف", icon: <CheckSquare size={16} />, children: [{ label: "تخته کانبان", page: "tasks-kanban" }, { label: "افزودن وظیفه", page: "create-task" }] }, { label: "پیگیری‌ها", icon: <BellRing size={16} />, children: [{ label: "فهرست", page: "follow-ups" }, { label: "ایجاد", page: "create-followup" }] }, { label: "تقویم", icon: <Calendar size={16} />, page: "tasks-calendar" }, { label: "تیکت‌ها", icon: <MessageSquare size={16} />, badge: ticketUnreadCount || undefined, children: [{ label: "تیکت‌های ارسالی", page: "tickets-sent" }, { label: "تیکت‌های دریافتی", page: "tickets-received" }, { label: "فهرست همه تیکت‌ها", page: "tickets-all" }, { label: "ثبت تیکت جدید", page: "create-ticket" }] }] },
     { heading: "افراد", items: [{ label: "مشاوران", icon: <Users size={16} />, children: [{ label: "فهرست", page: "consultants" }, { label: "افزودن مشاور", page: "add-consultant" }] }] },
     { heading: "هوش کسب‌وکار", items: [{ label: "گزارش فعالیت", icon: <Activity size={16} />, page: "activity" }] },
     { heading: "اطلاعات پایه", items: [{ label: "مدیریت مناطق", icon: <MapPin size={16} />, page: "manage-districts" }, { label: "مدیریت ویژگی‌ها", icon: <SlidersHorizontal size={16} />, page: "manage-attributes" }] },
@@ -26,11 +26,11 @@ function Sidebar({ role, page, navigate, collapsed, setCollapsed, userName, user
   ];
   const consultantSections: NavSection[] = [
     { items: [{ label: "داشبورد", icon: <LayoutDashboard size={16} />, page: "consultant-dashboard" }, { label: "املاک", icon: <Building2 size={16} />, children: [{ label: "ملک های من", page: "my-properties" }, { label: "همه املاک", page: "all-properties" }, { label: "افزودن", page: "add-property" }] }, { label: "آگهی‌های من", icon: <FileText size={16} />, page: "my-listings" }] },
-    { heading: "عملیات", items: [{ label: "وظایف من", icon: <CheckSquare size={16} />, page: "my-tasks" }, { label: "پیگیری‌های من", icon: <BellRing size={16} />, children: [{ label: "فهرست", page: "my-followups" }, { label: "ایجاد", page: "create-followup" }] }] },
+    { heading: "عملیات", items: [{ label: "وظایف من", icon: <CheckSquare size={16} />, page: "my-tasks" }, { label: "پیگیری‌های من", icon: <BellRing size={16} />, children: [{ label: "فهرست", page: "my-followups" }, { label: "ایجاد", page: "create-followup" }] }, { label: "تیکت‌ها", icon: <MessageSquare size={16} />, badge: ticketUnreadCount || undefined, children: [{ label: "تیکت‌های ارسالی", page: "tickets-sent" }, { label: "تیکت‌های دریافتی", page: "tickets-received" }, { label: "ثبت تیکت جدید", page: "create-ticket" }] }] },
     { heading: "پروفایل", items: [{ label: "پروفایل من", icon: <User size={16} />, children: [{ label: "نمای کلی", page: "my-profile" }, { label: "ویرایش پروفایل", page: "my-profile-edit" }, { label: "امنیت", page: "my-profile-security" }] }] },
   ];
   const sections = role === "admin" ? adminSections : consultantSections;
-  const [expanded, setExpanded] = useState<string[]>(["املاک", "وظایف", "گزارش‌ها"]);
+  const [expanded, setExpanded] = useState<string[]>(["املاک", "وظایف", "گزارش‌ها", "تیکت‌ها"]);
   const toggle = (l: string) => setExpanded((p) => p.includes(l) ? p.filter((x) => x !== l) : [...p, l]);
   const isActive = (p: Page) => page === p;
   const hasActive = (item: { children?: { page: Page }[] }) => item.children?.some((c) => isActive(c.page));
