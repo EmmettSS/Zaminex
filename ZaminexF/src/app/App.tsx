@@ -1126,6 +1126,57 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     [initialData.csrfToken]
   );
 
+  // ── Appraisal report (گزارش کارشناسی) ────────────────────────────────
+  // One PDF per property: the server replaces the previous file on upload
+  // and removes it on delete; the fresh metadata is folded straight into
+  // the selected property so the tab re-renders without a refetch.
+  const uploadAppraisalReport = useCallback(
+    async (propertyId: string, file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await apiFetch(
+        `/properties/api/properties/${propertyId}/appraisal-report/`,
+        { method: "POST", body: formData },
+        initialData.csrfToken
+      );
+
+      const data = await readJson(res);
+
+      if (!res.ok) {
+        throw new Error(apiErrorMessage(data, "خطا در بارگذاری گزارش کارشناسی"));
+      }
+
+      setSelectedProperty((prev) =>
+        prev && String(prev.id) === String(propertyId)
+          ? { ...prev, appraisalReport: data }
+          : prev
+      );
+      return { ok: true, data };
+    },
+    [initialData.csrfToken]
+  );
+
+  const deleteAppraisalReport = useCallback(
+    async (propertyId: string) => {
+      const res = await apiFetch(
+        `/properties/api/properties/${propertyId}/appraisal-report/`,
+        { method: "DELETE" },
+        initialData.csrfToken
+      );
+      if (!res.ok && res.status !== 204) {
+        const data = await readJson(res);
+        throw new Error(apiErrorMessage(data, "خطا در حذف گزارش کارشناسی"));
+      }
+      setSelectedProperty((prev) =>
+        prev && String(prev.id) === String(propertyId)
+          ? { ...prev, appraisalReport: null }
+          : prev
+      );
+    },
+    [initialData.csrfToken]
+  );
+
   const archiveProperty = useCallback(async (id: string) => {
     try {
       const res = await apiFetch(`/properties/api/properties/${id}/`, {
@@ -1446,6 +1497,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
             navigate={navigate}
             role={role}
             property={selectedProperty}
+            currentUserId={currentConsultantId}
             onArchive={archiveProperty}
             onDelete={deleteProperty}
             onUpdateStatus={updatePropertyStatus}
@@ -1455,6 +1507,8 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
             onDeleteImage={deletePropertyImage}
             onUploadImages={uploadPropertyImages}
             onReorderImages={reorderPropertyImages}
+            onUploadAppraisalReport={uploadAppraisalReport}
+            onDeleteAppraisalReport={deleteAppraisalReport}
           />
         );
       case "property-reports": {

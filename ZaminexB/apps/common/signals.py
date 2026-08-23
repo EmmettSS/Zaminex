@@ -94,6 +94,52 @@ def log_property_delete(sender, instance, **kwargs):
     )
 
 
+@receiver(post_save, sender="properties.PropertyAppraisalReport")
+@skip_on_raw
+def log_appraisal_report_save(sender, instance, created, **kwargs):
+    """Record appraisal-report uploads/replacements on the property feed.
+
+    A replacement is a delete + create pair, so the feed shows both the
+    removed and the newly attached file — an accurate audit trail.
+    """
+    verb = "بارگذاری شد" if created else "بروزرسانی شد"
+    log_activity(
+        user=instance.uploaded_by or instance.property.consultant,
+        action="create" if created else "update",
+        target_type="property",
+        target_id=instance.property_id,
+        description=(
+            f"گزارش کارشناسی «{instance.original_filename}» برای ملک "
+            f"«{instance.property.title}» {verb}"
+        ),
+        metadata={
+            "file": instance.original_filename,
+            "property_id": instance.property_id,
+        },
+    )
+
+
+@receiver(post_delete, sender="properties.PropertyAppraisalReport")
+@skip_on_raw
+def log_appraisal_report_delete(sender, instance, **kwargs):
+    # The property row may itself be mid-cascade here; property_id is safe
+    # to use without re-fetching the row.
+    log_activity(
+        user=instance.uploaded_by,
+        action="delete",
+        target_type="property",
+        target_id=instance.property_id,
+        description=(
+            f"گزارش کارشناسی «{instance.original_filename}» از ملک "
+            f"«{instance.property.title}» حذف شد"
+        ),
+        metadata={
+            "file": instance.original_filename,
+            "property_id": instance.property_id,
+        },
+    )
+
+
 # =============================================================================
 #  Listing signals
 # =============================================================================

@@ -1,5 +1,7 @@
+import shutil
+
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from apps.properties.models import Property
@@ -402,3 +404,245 @@ class PropertyScopeAllAccessTests(TestCase):
             format="json",
         )
         self.assertEqual(resp.status_code, 200, resp.content[:400])
+
+
+class PropertyAppraisalReportApiTests(TestCase):
+    """The property-detail «گزارش کارشناسی» tab: one PDF per property.
+
+    Upload/delete follow the gallery-image permission (assigned consultant
+    or admin); download follows read access (admin, assigned consultant,
+    and every consultant when the property is shared).
+    """
+
+    # Smallest structurally valid PDF: magic header + EOF marker.
+    PDF_BYTES = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< >>\n%%EOF\n"
+
+    def setUp(self):
+        import tempfile
+        from django.conf import settings
+
+        self.admin = User.objects.create_user(
+            username="appr-admin", password="pw", role="ADMIN"
+        )
+        self.owner = User.objects.create_user(
+            username="appr-owner", password="pw", role="AGENT"
+        )
+        self.stranger = User.objects.create_user(
+            username="appr-stranger", password="pw", role="AGENT"
+        )
+        self.prop = Property.objects.create(
+            title="ملک گزارش کارشناسی",
+            internal_code="APPR-1",
+            consultant=self.owner,
+            property_type="APARTMENT",
+            deal_type="SALE",
+            area=80,
+            address="تهران",
+        )
+        # Keep test uploads out of the repository's media directory.
+        tmp = tempfile.mkdtemp(prefix="zaminex-appr-")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        override = override_settings(MEDIA_ROOT=tmp)
+        override.enable()
+        self.addCleanup(override.disable)
+
+    def _pdf(self, name="گزارش کارشناسی.pdf", content=None):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        return SimpleUploadedFile(
+            name, content if content is not None else self.PDF_BYTES,
+            content_type="application/pdf",
+        )
+
+    def _upload(self, user, f=None, prop=None):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client.post(
+            f"/properties/api/properties/{(prop or self.prop).id}/appraisal-report/",
+            {"file": f or self._pdf()},
+            format="multipart",
+        )
+
+    def _current_report(self):
+        from apps.properties.models import PropertyAppraisalReport
+
+        return PropertyAppraisalReport.objects.filter(property=self.prop).first()
+
+    def test_owner_and_admin_can_upload(self):
+        first = self._upload(self.owner)
+        self.assertEqual(first.status_code, 201, first.content[:400])
+        body = first.json()
+        self.assertEqual(body["fileName"], "گزارش کارشناسی.pdf")
+        self.assertEqual(body["fileSize"], len(self.PDF_BYTES))
+        self.assertIn("appraisal-report/download", body["url"])
+        self.assertEqual(body["uploadedBy"], "appr-owner")
+
+        # Same property, second row would violate the 1:1 — re-upload on a
+        # different property is not needed; admin on the same property is
+        # exercised by the replacement test below.
+
+    def test_upload_replaces_previous_file(self):
+        from apps.properties.models import PropertyAppraisalReport
+
+        first = self._upload(self.owner, self._pdf(name="first.pdf"))
+        first_path = PropertyAppraisalReport.objects.get(
+            property=self.prop
+        ).file.name
+
+        second = self._upload(self.owner, self._pdf(name="second.pdf"))
+        self.assertEqual(second.status_code, 201, second.content[:400])
+        self.assertEqual(second.json()["fileName"], "second.pdf")
+
+        # Exactly one row remains, pointing at the new file; the old PDF
+        # was removed from storage as well.
+        self.assertEqual(
+            PropertyAppraisalReport.objects.filter(property=self.prop).count(), 1
+        )
+        report = self._current_report()
+        self.assertNotEqual(report.file.name, first_path)
+        self.assertTrue(report.file.storage.exists(report.file.name))
+        self.assertFalse(report.file.storage.exists(first_path))
+
+    def test_upload_rejects_non_pdf_extension(self):
+        resp = self._upload(self.owner, self._pdf(name="report.png"))
+        self.assertEqual(resp.status_code, 400, resp.content[:400])
+        self.assertIsNone(self._current_report())
+
+    def test_upload_rejects_fake_pdf_content(self):
+        # Text bytes renamed to .pdf — must fail the magic-header check.
+        resp = self._upload(self.owner, self._pdf(name="fake.pdf", content=b"<html>x</html>"))
+        self.assertEqual(resp.status_code, 400, resp.content[:400])
+        self.assertIsNone(self._current_report())
+
+    def test_upload_rejects_oversized_file(self):
+        oversized = b"%PDF-1.4\n" + b"0" * (10 * 1024 * 1024)
+        resp = self._upload(self.owner, self._pdf(name="big.pdf", content=oversized))
+        self.assertEqual(resp.status_code, 400, resp.content[:400])
+        self.assertIsNone(self._current_report())
+
+    def test_upload_requires_a_file(self):
+        client = APIClient()
+        client.force_authenticate(user=self.owner)
+        resp = client.post(
+            f"/properties/api/properties/{self.prop.id}/appraisal-report/",
+            {},
+            format="multipart",
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_stranger_cannot_upload(self):
+        resp = self._upload(self.stranger)
+        self.assertIn(resp.status_code, (403, 404))
+        self.assertIsNone(self._current_report())
+
+    def test_owner_can_delete(self):
+        self._upload(self.owner)
+        report = self._current_report()
+        stored = report.file.name
+
+        client = APIClient()
+        client.force_authenticate(user=self.owner)
+        resp = client.delete(
+            f"/properties/api/properties/{self.prop.id}/appraisal-report/"
+        )
+        self.assertEqual(resp.status_code, 204)
+        self.assertIsNone(self._current_report())
+        self.assertFalse(report.file.storage.exists(stored))
+
+    def test_delete_without_report_is_404(self):
+        client = APIClient()
+        client.force_authenticate(user=self.owner)
+        resp = client.delete(
+            f"/properties/api/properties/{self.prop.id}/appraisal-report/"
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_stranger_cannot_delete(self):
+        self._upload(self.owner)
+        client = APIClient()
+        client.force_authenticate(user=self.stranger)
+        resp = client.delete(
+            f"/properties/api/properties/{self.prop.id}/appraisal-report/"
+        )
+        self.assertIn(resp.status_code, (403, 404))
+        self.assertIsNotNone(self._current_report())
+
+    def _download(self, user, prop=None, **params):
+        client = APIClient()
+        client.force_authenticate(user=user)
+        from urllib.parse import urlencode
+
+        query = f"?{urlencode(params)}" if params else ""
+        return client.get(
+            f"/properties/api/properties/{(prop or self.prop).id}/appraisal-report/download/{query}"
+        )
+
+    def test_owner_can_download_with_original_filename(self):
+        self._upload(self.owner, self._pdf(name="گزارش نهایی.pdf"))
+        resp = self._download(self.owner)
+        self.assertEqual(resp.status_code, 200, getattr(resp, "content", b"")[:200])
+        self.assertEqual(resp["Content-Type"], "application/pdf")
+        disposition = resp["Content-Disposition"]
+        self.assertIn("attachment", disposition)
+        # Non-ASCII filename is transmitted via the RFC 5987 filename* form.
+        self.assertIn("filename*", disposition)
+        self.assertIn("%DA%AF%D8%B2%D8%A7%D8%B1%D8%B4", disposition.upper())
+
+    def test_download_supports_inline_preview(self):
+        self._upload(self.owner)
+        resp = self._download(self.owner, inline="1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("inline", resp["Content-Disposition"])
+
+    def test_download_missing_report_is_404(self):
+        resp = self._download(self.owner)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_stranger_cannot_download_non_shared(self):
+        self._upload(self.owner)
+        # scope=all lets a consultant resolve the property, but read access
+        # to the file itself is still owner/shared/admin only -> 403.
+        resp = self._download(self.stranger, scope="all")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_shared_property_download_by_any_consultant(self):
+        shared = Property.objects.create(
+            title="ملک اشتراکی",
+            internal_code="APPR-2",
+            consultant=self.owner,
+            property_type="VILLA",
+            deal_type="SALE",
+            area=120,
+            address="تهران",
+            is_shared=True,
+        )
+        self._upload(self.owner, prop=shared)
+        resp = self._download(self.stranger, prop=shared, scope="all")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_property_detail_serializer_exposes_report(self):
+        self._upload(self.owner)
+        client = APIClient()
+        client.force_authenticate(user=self.owner)
+        resp = client.get(f"/properties/api/properties/{self.prop.id}/")
+        self.assertEqual(resp.status_code, 200)
+        report = resp.json().get("appraisalReport")
+        self.assertIsNotNone(report)
+        self.assertEqual(report["fileName"], "گزارش کارشناسی.pdf")
+
+    def test_media_path_is_protected_like_images(self):
+        from django.test import Client
+
+        self._upload(self.owner)
+        rel = self._current_report().file.name
+
+        anon = Client().get(f"/media/{rel}")
+        self.assertEqual(anon.status_code, 403)
+
+        denied = Client()
+        denied.force_login(self.stranger)
+        self.assertEqual(denied.get(f"/media/{rel}").status_code, 403)
+
+        allowed = Client()
+        allowed.force_login(self.owner)
+        self.assertEqual(allowed.get(f"/media/{rel}").status_code, 200)

@@ -26,10 +26,11 @@ import { PROPERTY_STATUS_TO_BACKEND, PROPERTY_STATUSES } from "../../../shared/l
 import { statusBadge } from "../../../shared/components/ui/StatusBadge";
 import { Avatar } from "../../../shared/components/ui/Avatar";
 import { GalleryTab } from "../components/GalleryTab";
+import { AppraisalReportTab } from "../components/AppraisalReportTab";
 import { PropertyLocationMap } from "../components/PropertyLocationMap";
 import { PropertyAISummary } from "../components/PropertyAISummary";
 import { formatJalali } from "../../../shared/lib/jdate";
-function PropertyDetail({ navigate, role, property, onArchive, onDelete, onUpdateStatus, onToggleShared, openPropertyEdit, onDeleteImage, onUploadImages, onReorderImages, openPropertyReport }: PropertyDetailProps & { openPropertyReport?: (id: string) => void; }) {
+function PropertyDetail({ navigate, role, property, currentUserId, onArchive, onDelete, onUpdateStatus, onToggleShared, openPropertyEdit, onDeleteImage, onUploadImages, onReorderImages, onUploadAppraisalReport, onDeleteAppraisalReport, openPropertyReport }: PropertyDetailProps & { openPropertyReport?: (id: string) => void; }) {
   const [tab, setTab] = useState("نمای کلی");
   const [propStatus, setPropStatus] = useState(() => propertyStatusToUI(property?.propertyStatus));
   const [statusSaving, setStatusSaving] = useState(false);
@@ -43,7 +44,7 @@ function PropertyDetail({ navigate, role, property, onArchive, onDelete, onUpdat
   const [followupsLoading, setFollowupsLoading] = useState(false);
   const [sharedSaving, setSharedSaving] = useState(false);
 
-  const tabs = ["نمای کلی", "گالری", "آگهی‌ها", "وظایف", "پیگیری‌ها", "گزارش"];
+  const tabs = ["نمای کلی", "گالری", "آگهی‌ها", "وظایف", "پیگیری‌ها", "گزارش", "گزارش کارشناسی"];
 
   const buildGallery = (images?: any[] | null) =>
     images && images.length > 0 ? images : [];
@@ -154,6 +155,17 @@ function PropertyDetail({ navigate, role, property, onArchive, onDelete, onUpdat
     return consultantRef ? "مشاور" : "";
   })();
   const isSharedProperty = Boolean((property as any)?.isShared);
+  // Upload/delete rights for the appraisal-report tab mirror the gallery:
+  // the assigned consultant (کارشناس ثبت‌کننده / واگذارشده) or an admin.
+  // The server re-checks with can_manage_property; this only shapes the UI.
+  const canManageAppraisal =
+    role === "admin" ||
+    (currentUserId != null &&
+      property?.consultantId != null &&
+      String(property.consultantId) === String(currentUserId));
+  // Download rights mirror the gallery images: admins, the assigned
+  // consultant, and every consultant while the property is shared.
+  const canDownloadAppraisal = canManageAppraisal || isSharedProperty;
   const showConsultantDetails = Boolean(
     consultantRef && (role === "admin" || (role === "consultant" && !isSharedProperty))
   );
@@ -447,6 +459,17 @@ function PropertyDetail({ navigate, role, property, onArchive, onDelete, onUpdat
           />
         )}
 
+        {tab === "گزارش کارشناسی" && property && (
+          <AppraisalReportTab
+            propertyId={String(property.id)}
+            report={(property as any).appraisalReport ?? null}
+            canManage={canManageAppraisal}
+            canDownload={canDownloadAppraisal}
+            onUpload={onUploadAppraisalReport}
+            onDelete={onDeleteAppraisalReport}
+          />
+        )}
+
         {tab === "گزارش" && (
           <div className="max-w-4xl space-y-4">
             <Card className="p-5">
@@ -690,7 +713,7 @@ function PropertyDetail({ navigate, role, property, onArchive, onDelete, onUpdat
           </div>
         )}
 
-        {tab !== "نمای کلی" && tab !== "گالری" && tab !== "آگهی‌ها" && tab !== "وظایف" && tab !== "پیگیری‌ها" && tab !== "گزارش" && (
+        {tab !== "نمای کلی" && tab !== "گالری" && tab !== "آگهی‌ها" && tab !== "وظایف" && tab !== "پیگیری‌ها" && tab !== "گزارش" && tab !== "گزارش کارشناسی" && (
           <div className="max-w-3xl">
             <EmptyState
               icon={<Info size={28} />}

@@ -117,6 +117,7 @@ type Property = {
   gradient?: string;
   description?: string;
   images?: { id: string | number; url: string; alt?: string }[];
+  appraisalReport?: AppraisalReport | null;
   pricePerSqm?: number | null;
   imagesCount?: number;
   daysOnMarket?: number | null;
@@ -126,6 +127,16 @@ type Property = {
   engagementHeatScore?: number;
   latitude?: number | null;
   longitude?: number | null;
+};
+
+type AppraisalReport = {
+  id: string | number;
+  /** Authenticated download endpoint; `?inline=1` switches to preview. */
+  url: string;
+  fileName: string;
+  fileSize: number;
+  uploadedBy: string | null;
+  uploadedAt: string;
 };
 
 type BadgeV = "default" | "success" | "warning" | "danger" | "info" | "purple" | "muted" | "teal";
@@ -344,6 +355,7 @@ interface PropertyDetailProps {
   navigate: (p: Page, paramId?: string | number) => void;
   role: Role;
   property?: Property;
+  currentUserId?: string | number | null;
   onArchive: (id: string) => void;
   onDelete: (id: string) => void;
   onUpdateStatus?: (id: string, status: string) => Promise<boolean>;
@@ -352,11 +364,14 @@ interface PropertyDetailProps {
   onDeleteImage?: (propertyId: string, imageId: string) => Promise<void>;
   onUploadImages?: (propertyId: string, files: File[]) => Promise<any>;
   onReorderImages?: (propertyId: string, order: { id: string | number; sort_order: number }[]) => Promise<void>;
+  onUploadAppraisalReport?: (propertyId: string, file: File) => Promise<any>;
+  onDeleteAppraisalReport?: (propertyId: string) => Promise<void>;
 }
 
 export type {
   Role, Page, TaskHistoryEntry, ConsultantItem, FollowUpType, FollowUpStatus,
   FollowUp, FollowUpCreatePayload, BadgeV, PropertyReportPayload, Property,
+  AppraisalReport,
   Listing, NavSection, ActivityLogItem, ConsultantRole, AddConsultantFormState,
   ConsultantOption, ConsultantAnalyticsPayload, PropertiesPageProps, PropertyDetailProps,
   TicketSubjectType, TicketType, TicketPriority, TicketStatus, TicketUser,

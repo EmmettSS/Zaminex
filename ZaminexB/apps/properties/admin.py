@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Property, PropertyImage
+from .models import Property, PropertyAppraisalReport, PropertyImage
 
 
 class PropertyImageInline(admin.TabularInline):
@@ -48,3 +48,21 @@ class PropertyAdmin(admin.ModelAdmin):
 class PropertyImageAdmin(admin.ModelAdmin):
     list_display = ["property", "sort_order", "id"]
     list_filter = ["property"]
+
+
+@admin.register(PropertyAppraisalReport)
+class PropertyAppraisalReportAdmin(admin.ModelAdmin):
+    list_display = [
+        "property",
+        "original_filename",
+        "file_size",
+        "uploaded_by",
+        "created_at",
+    ]
+    search_fields = [
+        "property__title",
+        "property__internal_code",
+        "original_filename",
+    ]
+    list_filter = ["created_at"]
+    ordering = ["-created_at"]
