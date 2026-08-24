@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+
+{% block title %}Login | CRM{% endblock %}
+
+{% block content %}
+    <div id="root"></div>
+
+    {{ initial_data|json_script:"initial-data" }}
+    {{ login_errors|json_script:"login-errors" }}
+{% endblock %}

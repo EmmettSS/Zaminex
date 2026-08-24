@@ -1,0 +1,9 @@
+@font-face {
+	font-family: IRANRounded;
+	font-style: normal;
+	font-weight: 900;
+	src: url('../../fonts/eot/IRAN-Rounded.eot');
+	src: url('../../fonts/eot/IRAN-Rounded.eot?#iefix') format('embedded-opentype'),
+		 url('../../fonts/woff/IRAN-Rounded.woff') format('woff'),
+		 url('../../fonts/ttf/IRAN-Rounded.ttf') format('truetype');
+}

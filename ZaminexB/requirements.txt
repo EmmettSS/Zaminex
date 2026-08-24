@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+#  Zaminex backend dependencies
+#
+#  Install with:  pip install -r requirements.txt
+#  Versions are pinned so every environment (local, CI, production) resolves
+#  to the exact same packages.
+# ---------------------------------------------------------------------------
+
+# --- Core framework --------------------------------------------------------
+Django==5.2.16
+djangorestframework==3.17.1
+
+# --- Database --------------------------------------------------------------
+# PostgreSQL driver. `psycopg2-binary` ships prebuilt wheels, so no local
+# compiler or libpq headers are required.
+psycopg2-binary==2.9.12
+
+# Parses the DATABASE_URL environment variable into Django's DATABASES dict.
+dj-database-url==3.1.2
+
+# --- Configuration ---------------------------------------------------------
+
+# --- Media -----------------------------------------------------------------
+# Required by Django's ImageField (property gallery, consultant avatars).
+pillow==12.3.0
+
+# --- Persian calendar ------------------------------------------------------
+# Jalali (Shamsi) date conversion for the Persian monthly revenue chart.
+jdatetime==6.1.0
+
+# --- Search ----------------------------------------------------------------
+# Uses PostgreSQL pg_trgm (TrigramSimilarity) and Django postgres search
+# for native, field-by-field fuzzy matching with Persian normalization.
+
