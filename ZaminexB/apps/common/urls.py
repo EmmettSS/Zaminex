@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .activity_views import ActivityLogListView
+from .activity_views import ActivityLogListView, ActivityLogUserListView
 from .analytics_views import (
     AIInsightView,
     AnalyticsDashboardView,
@@ -31,6 +31,7 @@ urlpatterns = [
     path("analytics/listings/", ListingAnalyticsView.as_view(), name="analytics-listings"),
     path("analytics/dashboard/", AnalyticsDashboardView.as_view(), name="analytics-dashboard"),
     path("ai/<str:entity>/<int:pk>/", AIInsightView.as_view(), name="ai-insight"),
+    path("activity-log/users/", ActivityLogUserListView.as_view(), name="activity-log-users"),
     path("activity-log/", ActivityLogListView.as_view(), name="activity-log"),
     path("notifications/", NotificationListView.as_view(), name="notifications-list"),
     path("notifications/<int:pk>/read/", NotificationMarkReadView.as_view(), name="notification-mark-read"),

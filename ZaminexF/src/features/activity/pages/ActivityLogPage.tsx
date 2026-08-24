@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { cx } from "../../../shared/lib/utils";
-import { Page, Role, Property, Listing, FollowUp, ConsultantItem, BadgeV, FollowUpCreatePayload, ActivityLogItem } from "../../../shared/lib/types";
+import { Page, Role, Property, Listing, FollowUp, ConsultantItem, BadgeV, FollowUpCreatePayload, ActivityLogItem, ActivityLogUserOption } from "../../../shared/lib/types";
 import { fmtShort, toPersianType, toPersianDeal, toPersianPropertyStatus, toPersianTaskStatus, toPersianTaskType, toPersianPriority, toPersianChannel, propertyStatusToUI, toPersianFollowupType, toPersianListingStatus } from "../../../shared/lib/utils";
 import { Badge } from "../../../shared/components/ui/Badge";
 import { Btn } from "../../../shared/components/ui/Btn";
@@ -20,6 +20,11 @@ import { Building2, LayoutDashboard, FileText, CheckSquare, Users, BarChart3, Se
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis, ReferenceLine, ScatterChart, Scatter, ZAxis, RadialBarChart, RadialBar } from "recharts";
 function ActivityLogPage({ csrfToken }: { csrfToken: string }) {
   const [filter, setFilter] = useState("all");
+  // "all" | "system" | the user's pk as a string
+  const [userFilter, setUserFilter] = useState<string>("all");
+  const [logUsers, setLogUsers] = useState<ActivityLogUserOption[]>([]);
+  const [systemLogCount, setSystemLogCount] = useState(0);
+  const [logUsersLoading, setLogUsersLoading] = useState(true);
   const [items, setItems] = useState<ActivityLogItem[]>([]);
   const [summary, setSummary] = useState<{ total: number; thisWeek: number; completed: number }>({ total: 0, thisWeek: 0, completed: 0 });
   const [nextUrl, setNextUrl] = useState<string | null>(null);
@@ -48,10 +53,28 @@ function ActivityLogPage({ csrfToken }: { csrfToken: string }) {
       if (pageUrl) return apiPath(pageUrl);
       const qs = new URLSearchParams({ page_size: "30" });
       if (filter !== "all") qs.set("action", filter);
+      if (userFilter !== "all") qs.set("user_id", userFilter);
       return `/common/api/activity-log/?${qs.toString()}`;
     },
-    [filter, apiPath]
+    [filter, userFilter, apiPath]
   );
+
+  const loadLogUsers = useCallback(async () => {
+    setLogUsersLoading(true);
+    try {
+      const res = await apiFetch("/common/api/activity-log/users/", { method: "GET" }, csrfToken);
+      const data = await readJson(res);
+      if (!res.ok) return; // secondary control: degrade silently, page stays usable
+      setLogUsers(Array.isArray(data?.users) ? data.users : []);
+      setSystemLogCount(typeof data?.systemCount === "number" ? data.systemCount : 0);
+    } catch {
+      // non-fatal
+    } finally {
+      setLogUsersLoading(false);
+    }
+  }, [csrfToken]);
+
+  useEffect(() => { loadLogUsers(); }, [loadLogUsers]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,6 +109,10 @@ function ActivityLogPage({ csrfToken }: { csrfToken: string }) {
       setItems([]);
       setSummary({ total: 0, thisWeek: 0, completed: 0 });
       setNextUrl(null);
+      setUserFilter("all");
+      setLogUsers([]);
+      setSystemLogCount(0);
+      loadLogUsers();
       setConfirmDeleteAll(false);
     } catch (err: any) {
       toast({ type: "error", message: err?.message || "خطا در حذف گزارش‌های فعالیت" });
@@ -168,7 +195,7 @@ function ActivityLogPage({ csrfToken }: { csrfToken: string }) {
         <KpiCard label="وظایف تکمیل‌شده" value={summary.completed.toLocaleString("fa-IR")} icon={<CheckCircle2 size={16} />} color="bg-emerald-50 text-emerald-600" />
       </div>
       <div className="flex gap-4">
-        <div className="w-44 flex-shrink-0">
+        <div className="w-44 flex-shrink-0 space-y-4">
           <Card className="p-3">
             <p className="text-xs font-semibold text-muted-foreground mb-2 px-1">فیلتر بر اساس نوع</p>
             {types.map((t) => (
@@ -177,6 +204,41 @@ function ActivityLogPage({ csrfToken }: { csrfToken: string }) {
               </button>
             ))}
           </Card>
+          {!logUsersLoading && (logUsers.length > 0 || systemLogCount > 0) && (
+            <Card className="p-3">
+              <p className="text-xs font-semibold text-muted-foreground mb-2 px-1">فیلتر بر اساس کاربر</p>
+              <button
+                onClick={() => setUserFilter("all")}
+                className={cx("w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-right text-xs font-medium transition-colors mb-0.5", userFilter === "all" ? "bg-primary text-white" : "hover:bg-secondary text-foreground")}
+              >
+                <span>همه کاربران</span>
+              </button>
+              {systemLogCount > 0 && (
+                <button
+                  onClick={() => setUserFilter("system")}
+                  className={cx("w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-right text-xs font-medium transition-colors mb-0.5", userFilter === "system" ? "bg-primary text-white" : "hover:bg-secondary text-foreground")}
+                >
+                  <span className="flex items-center gap-1.5 truncate"><Settings size={12} />سیستم</span>
+                  <span className={cx("text-[10px] flex-shrink-0", userFilter === "system" ? "text-white/70" : "text-muted-foreground")}>{systemLogCount.toLocaleString("fa-IR")}</span>
+                </button>
+              )}
+              {logUsers.length > 0 && (
+                <div className="max-h-64 overflow-y-auto mt-1">
+                  {logUsers.map((u) => (
+                    <button
+                      key={u.id}
+                      onClick={() => setUserFilter(String(u.id))}
+                      title={`${u.name} (${u.roleLabel})`}
+                      className={cx("w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-right text-xs font-medium transition-colors mb-0.5", userFilter === String(u.id) ? "bg-primary text-white" : "hover:bg-secondary text-foreground")}
+                    >
+                      <span className="truncate flex-1 text-right">{u.name}</span>
+                      <span className={cx("text-[10px] flex-shrink-0", userFilter === String(u.id) ? "text-white/70" : "text-muted-foreground")}>{u.logCount.toLocaleString("fa-IR")}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
         </div>
         <div className="flex-1">
           <Card className="overflow-hidden">

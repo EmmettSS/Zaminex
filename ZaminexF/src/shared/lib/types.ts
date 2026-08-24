@@ -280,6 +280,15 @@ type ActivityLogItem = {
   createdAt: string;
 };
 
+/** One entry of the admin "filter by user" list on the activity page. */
+type ActivityLogUserOption = {
+  id: number;
+  name: string;
+  role: string;
+  roleLabel: string;
+  logCount: number;
+};
+
 type ConsultantRole = "AGENT";
 
 type AddConsultantFormState = {
@@ -372,7 +381,7 @@ export type {
   Role, Page, TaskHistoryEntry, ConsultantItem, FollowUpType, FollowUpStatus,
   FollowUp, FollowUpCreatePayload, BadgeV, PropertyReportPayload, Property,
   AppraisalReport,
-  Listing, NavSection, ActivityLogItem, ConsultantRole, AddConsultantFormState,
+  Listing, NavSection, ActivityLogItem, ActivityLogUserOption, ConsultantRole, AddConsultantFormState,
   ConsultantOption, ConsultantAnalyticsPayload, PropertiesPageProps, PropertyDetailProps,
   TicketSubjectType, TicketType, TicketPriority, TicketStatus, TicketUser,
   TicketSubject, TicketAttachment, TicketMessage, TicketRow, TicketDetail,
