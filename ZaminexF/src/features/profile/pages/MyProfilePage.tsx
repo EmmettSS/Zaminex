@@ -16,7 +16,7 @@ import { Pagination } from "../../../shared/components/Pagination";
 import { DistrictCombobox } from "../../../shared/components/ui/DistrictCombobox";
 import { apiFetch, readJson, apiErrorMessage, getCsrfToken } from "../../../shared/lib/apiClient";
 import { toast } from "../../../shared/lib/utils";
-import { Building2, LayoutDashboard, FileText, CheckSquare, Users, BarChart3, Settings, Bell, Search, LogOut, Plus, ChevronLeft, ChevronDown, ChevronRight, Clock, CheckCircle2, AlertCircle, MoreHorizontal, MapPin, Eye, Edit2, Trash2, Archive, Phone, Mail, Calendar, TrendingUp, Activity, Command, Star, List, LayoutGrid, Download, Shield, User, Lock, Key, RefreshCw, Circle, Zap, Target, Award, Upload, Check, AlertTriangle, Info, XCircle, Loader2, CircleCheck, TriangleAlert, Columns, Send, BellRing, X, ChevronUp, SlidersHorizontal, ArrowUpRight, Layers, MessageSquare, Sparkles, GripVertical, MoreVertical, Building, History, Flame, Image, Filter } from "lucide-react";
+import { Building2, LayoutDashboard, FileText, CheckSquare, Users, BarChart3, Settings, Bell, Search, LogOut, Plus, ChevronLeft, ChevronDown, ChevronRight, Clock, CheckCircle2, AlertCircle, MoreHorizontal, MapPin, Eye, Edit2, Trash2, Archive, Phone, Mail, Calendar, TrendingUp, Activity, Command, Star, List, LayoutGrid, Download, Shield, User, Lock, Key, RefreshCw, Circle, Zap, Target, Award, Upload, Check, AlertTriangle, Info, XCircle, Loader2, CircleCheck, TriangleAlert, Columns, Send, BellRing, X, ChevronUp, SlidersHorizontal, ArrowUpRight, Layers, MessageSquare, Sparkles, GripVertical, MoreVertical, Building, History, Flame, Image, Filter, Smartphone } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis, ReferenceLine, ScatterChart, Scatter, ZAxis, RadialBarChart, RadialBar } from "recharts";
 function MyProfilePage({
   page,
@@ -35,11 +35,13 @@ function MyProfilePage({
   onProfileUpdated?: (newName: string) => void;
   districtsList: string[];
 }) {
-  const tabs: { label: string; page: Page }[] = [
+  const tabs: { label: string; page: Page; adminOnly?: boolean }[] = [
     { label: "نمای کلی", page: "my-profile" },
     { label: "ویرایش پروفایل", page: "my-profile-edit" },
     { label: "امنیت", page: "my-profile-security" },
+    { label: "گزینه‌های ورود", page: "my-profile-login-options", adminOnly: true },
   ];
+  const visibleTabs = tabs.filter((t) => !t.adminOnly || role === "admin");
 
   // Admins use their own dedicated profile API; consultants use theirs.
   // The response shape is identical, so this whole page works for both roles.
@@ -68,6 +70,14 @@ function MyProfilePage({
   });
   const [savingPassword, setSavingPassword] = useState(false);
   const [secError, setSecError] = useState<string | null>(null);
+
+  // ── «گزینه‌های ورود» (admin only) ────────────────────────────────────
+  const [loginMethod, setLoginMethod] = useState<"password" | "sms">("password");
+  const [selectedMethod, setSelectedMethod] = useState<"password" | "sms">("password");
+  const [smsConfigured, setSmsConfigured] = useState(false);
+  const [loginOptionsLoading, setLoginOptionsLoading] = useState(false);
+  const [savingLoginMethod, setSavingLoginMethod] = useState(false);
+  const [loginOptionsError, setLoginOptionsError] = useState<string | null>(null);
 
   const setEdit = (k: string, v: string) => setEditForm((p) => ({ ...p, [k]: v }));
   const setPass = (k: string, v: string) => setPassForm((p) => ({ ...p, [k]: v }));
@@ -102,6 +112,53 @@ function MyProfilePage({
   useEffect(() => {
     loadProfile();
   }, [loadProfile]);
+
+  const loadLoginOptions = useCallback(async () => {
+    setLoginOptionsLoading(true);
+    setLoginOptionsError(null);
+    try {
+      const res = await apiFetch("/accounts/login-options/", { method: "GET" }, csrfToken);
+      const data = await readJson(res);
+      if (!res.ok) throw new Error(apiErrorMessage(data, "خطا در دریافت گزینه‌های ورود"));
+      const method = data.method === "sms" ? "sms" : "password";
+      setLoginMethod(method);
+      setSelectedMethod(method);
+      setSmsConfigured(Boolean(data.smsConfigured));
+    } catch (err: any) {
+      setLoginOptionsError(err.message || "خطا در دریافت گزینه‌های ورود");
+    } finally {
+      setLoginOptionsLoading(false);
+    }
+  }, [csrfToken]);
+
+  useEffect(() => {
+    if (page !== "my-profile-login-options") return;
+    loadLoginOptions();
+  }, [page, loadLoginOptions]);
+
+  const saveLoginMethod = async () => {
+    if (selectedMethod === loginMethod) return;
+    setSavingLoginMethod(true);
+    setLoginOptionsError(null);
+    try {
+      const res = await apiFetch("/accounts/login-options/", {
+        method: "PATCH",
+        body: JSON.stringify({ method: selectedMethod }),
+      }, csrfToken);
+      const data = await readJson(res);
+      if (!res.ok) throw new Error(apiErrorMessage(data, "خطا در ذخیره گزینه ورود"));
+      setLoginMethod(selectedMethod);
+      setSmsConfigured(Boolean(data.smsConfigured));
+      toast({
+        type: "success",
+        message: selectedMethod === "sms" ? "ورود با کد پیامکی فعال شد." : "ورود با رمز عبور فعال شد.",
+      });
+    } catch (err: any) {
+      setLoginOptionsError(err.message || "خطا در ذخیره گزینه ورود");
+    } finally {
+      setSavingLoginMethod(false);
+    }
+  };
 
   const handleSaveProfile = async () => {
     if (!editForm.firstName.trim() || !editForm.lastName.trim()) {
@@ -194,7 +251,7 @@ function MyProfilePage({
   return (
     <div className="p-6 max-w-3xl mx-auto">
       <PageHeader title="پروفایل من" />
-      <div className="flex gap-1 border-b border-border mb-5">{tabs.map((t) => <button key={t.page} onClick={() => navigate(t.page)} className={cx("px-4 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-colors", page === t.page ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{t.label}</button>)}</div>
+      <div className="flex gap-1 border-b border-border mb-5">{visibleTabs.map((t) => <button key={t.page} onClick={() => navigate(t.page)} className={cx("px-4 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-colors", page === t.page ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{t.label}</button>)}</div>
       {loading ? (
         <Card className="p-12 text-center text-sm text-muted-foreground">
           <Loader2 size={24} className="animate-spin mx-auto mb-3 text-primary" />
@@ -306,6 +363,78 @@ function MyProfilePage({
               <Lock size={13} />{savingPassword ? "در حال تغییر رمز…" : "تغییر رمز عبور"}
             </Btn>
           </div>
+        </Card>
+      ) : page === "my-profile-login-options" ? (
+        <Card className="p-6 space-y-5">
+          <div>
+            <h2 className="text-base font-semibold">گزینه‌های ورود</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              مشخص کنید کاربران در حال حاضر با رمز عبور وارد شوند یا با کد پیامکی. این انتخاب بلافاصله برای کل سامانه اعمال می‌شود.
+            </p>
+          </div>
+
+          {loginOptionsLoading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2 size={16} className="animate-spin text-primary" />
+              در حال بارگذاری گزینه‌های ورود…
+            </div>
+          ) : (
+            <>
+              {loginOptionsError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-600">{loginOptionsError}</div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedMethod("password")}
+                  className={cx(
+                    "rounded-xl border p-4 text-right transition-all",
+                    selectedMethod === "password" ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-border hover:border-primary/40"
+                  )}
+                >
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Lock size={16} className={selectedMethod === "password" ? "text-primary" : "text-muted-foreground"} />
+                    <span className="text-sm font-semibold">ورود با رمز عبور</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">کاربر با نام کاربری و رمز عبور وارد سامانه می‌شود.</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedMethod("sms")}
+                  className={cx(
+                    "rounded-xl border p-4 text-right transition-all",
+                    selectedMethod === "sms" ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-border hover:border-primary/40"
+                  )}
+                >
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Smartphone size={16} className={selectedMethod === "sms" ? "text-primary" : "text-muted-foreground"} />
+                    <span className="text-sm font-semibold">ورود با کد پیامکی</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">کد تأیید یک‌بارمصرف به شماره موبایل کاربر پیامک می‌شود.</p>
+                </button>
+              </div>
+
+              {selectedMethod === "sms" && !smsConfigured && (
+                <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-700 leading-relaxed">
+                  تنظیمات سرویس پیامک (کلید API و قالب) هنوز در پنل ادمین جنگو تکمیل نشده است؛ تا وقتی تکمیل نشود، ارسال کد تأیید ممکن نیست.
+                </div>
+              )}
+
+              {selectedMethod === "sms" && profile && !profile.mobile && (
+                <div className="rounded-xl bg-blue-50 border border-blue-200 p-4 text-xs text-blue-700 leading-relaxed">
+                  توجه: شماره موبایل حساب شما ثبت نشده است. اگر ورود پیامکی فعال شود، ابتدا از «ویرایش پروفایل» شماره موبایل خود را ثبت کنید، وگرنه ممکن است از ورود باز بمانید.
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-border">
+                <Btn variant="primary" onClick={saveLoginMethod} disabled={savingLoginMethod || loginOptionsLoading || selectedMethod === loginMethod}>
+                  <Check size={13} />{savingLoginMethod ? "در حال ذخیره…" : "ذخیره گزینه ورود"}
+                </Btn>
+              </div>
+            </>
+          )}
         </Card>
       ) : null}
     </div>

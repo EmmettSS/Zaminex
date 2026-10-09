@@ -19,6 +19,9 @@ INACTIVE_ACCOUNT_MESSAGE = (
     "با مدیریت مجموعه تماس بگیرید."
 )
 INVALID_LOGIN_MESSAGE = "نام کاربری یا رمز عبور واردشده صحیح نیست."
+SMS_LOGIN_REQUIRED_MESSAGE = (
+    "ورود با رمز عبور در حال حاضر غیرفعال است. لطفاً با کد پیامکی وارد شوید."
+)
 
 
 class ZaminexAuthenticationForm(AuthenticationForm):
@@ -28,7 +31,15 @@ class ZaminexAuthenticationForm(AuthenticationForm):
     configured window temporarily block login with that username. The lock is
     account-scoped (not only IP-scoped), is persisted in the database, and is
     cleared after a successful login.
+
+    ``enforce_login_method`` gates password login on the admin's global
+    «گزینه‌های ورود» switch: when SMS is active, the password path is rejected
+    here so the choice is enforced server-side, not just hidden in the UI.
     """
+
+    # Disabled by ZaminexAdminAuthenticationForm so the Django admin login
+    # (the superuser's recovery surface) always keeps accepting a password.
+    enforce_login_method = True
 
     error_messages = {
         **AuthenticationForm.error_messages,
@@ -52,6 +63,16 @@ class ZaminexAuthenticationForm(AuthenticationForm):
     def clean(self):
         username = self.cleaned_data.get("username")
         password = self.cleaned_data.get("password")
+
+        if self.enforce_login_method:
+            from .sms import active_login_method
+            from .models import LoginMethod
+
+            if active_login_method() == LoginMethod.SMS:
+                raise ValidationError(
+                    SMS_LOGIN_REQUIRED_MESSAGE,
+                    code="sms_only",
+                )
 
         if not username or not password:
             return super().clean()
@@ -102,7 +123,14 @@ class ZaminexAuthenticationForm(AuthenticationForm):
 
 
 class ZaminexAdminAuthenticationForm(ZaminexAuthenticationForm):
-    """Django admin login: same lockout, and only ADMIN staff may enter."""
+    """Django admin login: same lockout, and only ADMIN staff may enter.
+
+    The «گزینه‌های ورود» switch is deliberately *not* enforced here: /admin/
+    is the superuser's recovery surface, so it always keeps accepting a
+    password even when the CRM itself is set to SMS-only.
+    """
+
+    enforce_login_method = False
 
     def confirm_login_allowed(self, user):
         super().confirm_login_allowed(user)

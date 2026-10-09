@@ -81,6 +81,164 @@ class ConsultantProfile(models.Model):
         return self.full_name
 
 
+class LoginMethod(models.TextChoices):
+    PASSWORD = "password", "رمز عبور"
+    SMS = "sms", "کد پیامکی"
+
+
+class LoginSettings(models.Model):
+    """Singleton: which login method the whole system uses right now.
+
+    Edited by the admin from «پروفایل من → گزینه‌های ورود» (and also exposed in
+    Django admin as a fallback surface). When ``method`` is ``sms`` the
+    password form is rejected and vice versa, so the switch is always
+    authoritative for the entire CRM.
+    """
+
+    method = models.CharField(
+        max_length=20,
+        choices=LoginMethod.choices,
+        default=LoginMethod.PASSWORD,
+        verbose_name="روش ورود",
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاریخ بروزرسانی")
+
+    class Meta:
+        verbose_name = "روش ورود"
+        verbose_name_plural = "روش ورود"
+
+    def __str__(self):
+        return self.get_method_display()
+
+    DEFAULTS = {"method": LoginMethod.PASSWORD}
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1, defaults=cls.DEFAULTS)
+        return obj
+
+
+class SmsProviderSettings(models.Model):
+    """Singleton SMS gateway configuration.
+
+    Credentials are entered exclusively through Django admin (never committed
+    to the code base) and stored encrypted at rest, exactly like the AI API
+    key on ``CompanySettings``. sms.ir is the primary provider and kavenegar
+    is the automatic fallback.
+    """
+
+    # --- sms.ir (primary) -------------------------------------------------
+    smsir_api_key = models.CharField(
+        max_length=1024, blank=True, verbose_name="کلید API اسمس‌دات‌آی‌آر"
+    )
+    smsir_line_number = models.CharField(
+        max_length=32,
+        blank=True,
+        verbose_name="شماره خط اسمس‌دات‌آی‌آر",
+        help_text="اختیاری؛ فقط اگر سرویس‌دهنده نیاز دارد وارد شود.",
+    )
+    smsir_template_id = models.CharField(
+        max_length=64,
+        blank=True,
+        verbose_name="شناسه قالب (templateId)",
+        help_text="قالب تأیید (verify) در پنل اسمس‌دات‌آی‌آر.",
+    )
+
+    # --- kavenegar (backup) ----------------------------------------------
+    kavenegar_api_key = models.CharField(
+        max_length=1024, blank=True, verbose_name="کلید API کاوه‌نگار"
+    )
+    kavenegar_sender = models.CharField(
+        max_length=32,
+        blank=True,
+        default="20006535",
+        verbose_name="شماره فرستنده کاوه‌نگار",
+    )
+    kavenegar_template_name = models.CharField(
+        max_length=128,
+        blank=True,
+        verbose_name="نام قالب احراز هویت کاوه‌نگار",
+        help_text="اختیاری؛ اگر تنظیم شود کد از طریق قالب (lookup) ارسال می‌شود، وگرنه پیام متنی ساده.",
+    )
+    kavenegar_message = models.CharField(
+        max_length=500,
+        blank=True,
+        default="کد ورود شما به زمینکس: {code}",
+        verbose_name="متن پیام (در صورت نبود قالب)",
+        help_text="متن سادهٔ پیامک؛ {code} با کد تأیید جایگزین می‌شود.",
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاریخ بروزرسانی")
+
+    class Meta:
+        verbose_name = "تنظیمات پیامک"
+        verbose_name_plural = "تنظیمات پیامک"
+
+    def __str__(self):
+        return "تنظیمات سرویس پیامک"
+
+    @property
+    def smsir_api_key_plain(self) -> str:
+        from apps.common.crypto import decrypt_secret
+
+        return decrypt_secret(self.smsir_api_key)
+
+    @property
+    def kavenegar_api_key_plain(self) -> str:
+        from apps.common.crypto import decrypt_secret
+
+        return decrypt_secret(self.kavenegar_api_key)
+
+    def save(self, *args, **kwargs):
+        # If a caller assigns a plaintext key (e.g. from Django admin),
+        # encrypt it transparently on the way to the database.
+        from apps.common.crypto import encrypt_secret
+
+        if self.smsir_api_key and not self.smsir_api_key.startswith("enc:v1:"):
+            self.smsir_api_key = encrypt_secret(self.smsir_api_key)
+        if self.kavenegar_api_key and not self.kavenegar_api_key.startswith("enc:v1:"):
+            self.kavenegar_api_key = encrypt_secret(self.kavenegar_api_key)
+        super().save(*args, **kwargs)
+
+    DEFAULTS = {
+        "smsir_api_key": "",
+        "smsir_line_number": "",
+        "smsir_template_id": "",
+        "kavenegar_api_key": "",
+        "kavenegar_sender": "20006535",
+        "kavenegar_template_name": "",
+        "kavenegar_message": "کد ورود شما به زمینکس: {code}",
+    }
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1, defaults=cls.DEFAULTS)
+        return obj
+
+
+class SmsLoginCode(models.Model):
+    """A single-use, expiring OTP issued for SMS login.
+
+    The code itself is stored as a salted hash (Django ``make_password``), so a
+    database leak never exposes usable codes. Rate limits and the expiry window
+    are enforced in ``apps.accounts.sms``.
+    """
+
+    mobile = models.CharField(max_length=16, db_index=True, verbose_name="شماره موبایل")
+    code_hash = models.CharField(max_length=255, verbose_name="کد (هش‌شده)")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ ایجاد")
+    expires_at = models.DateTimeField(db_index=True, verbose_name="انقضا")
+    attempts = models.PositiveSmallIntegerField(default=0, verbose_name="تلاش‌های ناموفق")
+    consumed_at = models.DateTimeField(null=True, blank=True, verbose_name="تاریخ مصرف")
+
+    class Meta:
+        verbose_name = "کد ورود پیامکی"
+        verbose_name_plural = "کدهای ورود پیامکی"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.mobile} ({self.created_at:%Y-%m-%d %H:%M})"
+
+
 class AdminProfile(models.Model):
     """Profile for ADMIN users.
 
