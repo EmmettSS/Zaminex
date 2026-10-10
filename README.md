@@ -34,6 +34,7 @@ The whole interface is Persian (RTL).
 | I received a new version of the code | [Situation 3](#9-situation-3-you-have-the-project-and-receive-a-new-version-of-the-code) | Back up first, then replace the code and run `migrate` |
 | I want to continue on another computer or server | [Restore a backup](#10-restore-a-backup-moving-to-a-new-computer-or-server) | Run 5 commands, one after another |
 | I see `duplicate key value violates unique constraint` | [`resync_sequences`](#11-the-resync_sequences-command--why-and-when) | Run one command and the problem is fixed |
+| `migrate` stops with `relation "…" already exists` | [`repair_migrations`](#error-relation--already-exists-when-running-migrate) | Run one command and the problem is fixed |
 
 ---
 
@@ -232,6 +233,10 @@ python manage.py runserver
 ```
 
 **Your data stays in place.** There is no need to load `seed_data.json` again.
+
+> If `migrate` stops with `relation "…" already exists`, your database and the
+> migration list are out of step. One command fixes it - see
+> [`repair_migrations`](#error-relation--already-exists-when-running-migrate).
 
 ---
 
@@ -438,6 +443,34 @@ python manage.py resync_sequences
 
 Full explanation in [section 11](#11-the-resync_sequences-command--why-and-when).
 
+### Error `relation "…" already exists` when running `migrate`
+
+**In plain words.** Django keeps its own list of the migrations it has run (the
+`django_migrations` table) and compares it with the migration files in the project. When the two
+disagree - after a backup restored by hand, or after a migration was run from another copy of the
+project - Django tries to create something that is already there and stops:
+
+```
+django.db.utils.ProgrammingError: relation "accounts_loginsettings" already exists
+```
+
+**Do not fix this with `migrate --fake`.** That marks migrations as done without looking at the
+database, so a half-finished database can stay half-finished and the next error is even harder to
+read.
+
+`repair_migrations` looks at every migration that Django believes is missing, compares it with what
+is really in the database, and then:
+
+- records the migrations whose tables, columns and indexes are already there - nothing is run twice;
+- applies only the parts that are genuinely missing.
+
+```bash
+cd ZaminexB
+python manage.py repair_migrations --dry-run   # look first, changes nothing
+python manage.py repair_migrations             # repair
+python manage.py migrate                       # now says: No migrations to apply
+```
+
 ### Warning `pg_trgm.W001` after restoring `zaminex_backup.sql`
 
 The backup file records the migration `common.0006_pg_trgm_extension` as already applied but does not
@@ -470,5 +503,7 @@ npm run build
 - [ ] The `zaminex_backup.sql` backup was restored **and `python manage.py resync_sequences` was run
       right after it** — or the database was created empty with `seed_data.json`
 - [ ] `python manage.py migrate` finished without errors
+- [ ] If `migrate` complained about a relation that already exists, `python manage.py
+      repair_migrations` was run first and `migrate` was run again afterwards
 - [ ] `python manage.py runserver` runs and http://localhost:8000/ opens
 - [ ] After entering real data, you immediately took a `pg_dump` backup
