@@ -260,7 +260,6 @@ function TasksKanban({
         </Btn>
       </div>
 
-      {/* Task Filter Panel */}
       {showFilter && (
         <Card className="p-4 mb-4 border border-border/80 shadow-sm bg-card rounded-2xl">
           <div className="flex items-center justify-between pb-3 mb-3 border-b border-border/60">

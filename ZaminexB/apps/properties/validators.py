@@ -1,27 +1,19 @@
-"""Reusable validators for property file uploads."""
-
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext as _
 
-# Only accept common web image formats. Pillow already verifies the actual
-# content when ImageField is saved, but rejecting unknown extensions early
-# gives a clearer Persian error and prevents HTML/SVG uploads.
 ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
-MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB
+MAX_IMAGE_SIZE = 5 * 1024 * 1024
 
-# Appraisal reports (گزارش کارشناسی) are PDF-only, capped at 10 MB.
 ALLOWED_APPRAISAL_EXTENSION = "pdf"
-MAX_APPRAISAL_SIZE = 10 * 1024 * 1024  # 10 MB
-# A valid PDF always carries the "%PDF-" magic header within its first
-# kilobyte (the spec allows leading junk, in practice it is at offset 0).
+MAX_APPRAISAL_SIZE = 10 * 1024 * 1024
+
 PDF_MAGIC = b"%PDF-"
 
 
 def validate_property_image(file):
     if not file:
         return
-    # Size guard. Django's FILE_UPLOAD_MAX_MEMORY_SIZE is global; this is
-    # specific to property images.
+    
     if getattr(file, "size", 0) and file.size > MAX_IMAGE_SIZE:
         raise ValidationError(
             _("حجم تصویر نباید بیشتر از ۵ مگابایت باشد.")
@@ -32,8 +24,7 @@ def validate_property_image(file):
         raise ValidationError(
             _("فقط فایل‌های JPG، PNG و WebP مجاز هستند.")
         )
-    # Pillow-based content check. If the bytes are not a real image, this
-    # raises a clear validation error instead of a 500.
+    
     try:
         from PIL import Image
     except Exception:
@@ -42,10 +33,8 @@ def validate_property_image(file):
     try:
         file.seek(0)
         with Image.open(file) as im:
-            # verify() checks structural integrity without decoding
-            # pixels; load() forces full decoding so truncated files
-            # are rejected too.
             im.verify()
+
         file.seek(0)
         with Image.open(file) as im:
             im.load()
@@ -63,18 +52,6 @@ def validate_property_image(file):
 
 
 def validate_appraisal_pdf(file):
-    """Validate an uploaded appraisal report (گزارش کارشناسی).
-
-    The tab accepts exactly one PDF per property. Guards, in order:
-
-    * size cap of 10 MB;
-    * `.pdf` extension, so browsers and users get a clear Persian error
-      before anything hits the disk;
-    * the ``%PDF-`` magic header, so a renamed non-PDF never reaches
-      storage. The browser's Content-Type is trivially spoofed, and a
-      disguised HTML/JS file served under our origin would be a stored
-      XSS vector, so the bytes themselves are inspected.
-    """
     if not file:
         return
     if getattr(file, "size", 0) and file.size > MAX_APPRAISAL_SIZE:

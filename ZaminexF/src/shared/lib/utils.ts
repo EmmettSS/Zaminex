@@ -1,7 +1,3 @@
-// =============================================================================
-//  Utility helpers (extracted exactly from App.tsx)
-// =============================================================================
-
 const fmtShort = (n: number) =>
   n >= 1_000_000_000
     ? `${(n / 1_000_000_000).toLocaleString("fa-IR", { maximumFractionDigits: 1 })} میلیارد تومان`
@@ -26,7 +22,7 @@ const propertyStatusToUI = (status?: string | null): string => {
   return found || "Available";
 };
 
-// Standard Persian real estate CRM translators
+
 const toPersianType = (type?: string | null): string => {
   const map: Record<string, string> = {
     "Apartment": "آپارتمان", "APARTMENT": "آپارتمان", "apartment": "آپارتمان",
@@ -227,3 +223,162 @@ export function subscribeToToasts(listener: ToastListener) {
 export function toast(item: Omit<ToastItem, "id">) {
   toastListener?.(item);
 }
+
+
+function normalizeCoordinateInput(raw: string): string {
+  return String(raw)
+    .trim()
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/٫|،|,/g, ".")
+    .replace(/\s+/g, "");
+}
+
+
+export function parseCoordinate(raw: string | number | null | undefined): number | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  const cleaned = normalizeCoordinateInput(raw);
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+
+export const IRAN_LAT_RANGE: [number, number] = [25, 40];
+export const IRAN_LON_RANGE: [number, number] = [44, 64];
+
+export type CoordinateValidation =
+  | { state: "empty" }
+  | { state: "invalid"; error: string }
+  | { state: "valid"; value: [number, number] };
+
+  
+export function validateCoordinatePair(
+  latRaw: string | number | null | undefined,
+  lngRaw: string | number | null | undefined
+): CoordinateValidation {
+  const latText = String(latRaw ?? "").trim();
+  const lngText = String(lngRaw ?? "").trim();
+  if (!latText && !lngText) return { state: "empty" };
+
+  const lat = parseCoordinate(latText);
+  const lng = parseCoordinate(lngText);
+  if (lat === null || lng === null) {
+    return {
+      state: "invalid",
+      error: "عرض و طول جغرافیایی معتبر نیست؛ مختصات را به‌صورت عددی وارد کنید.",
+    };
+  }
+  if (
+    lat < IRAN_LAT_RANGE[0] ||
+    lat > IRAN_LAT_RANGE[1] ||
+    lng < IRAN_LON_RANGE[0] ||
+    lng > IRAN_LON_RANGE[1]
+  ) {
+    return {
+      state: "invalid",
+      error: "مختصات واردشده خارج از محدوده جغرافیایی ایران است؛ عرض باید بین ۲۵ تا ۴۰ و طول باید بین ۴۴ تا ۶۴ باشد.",
+    };
+  }
+  return { state: "valid", value: [Number(lat.toFixed(6)), Number(lng.toFixed(6))] };
+}
+
+
+export function normalizePhone(raw: string | number | null | undefined): string {
+  return String(raw ?? "")
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[\s-]/g, "");
+}
+
+
+export function ownerPhoneError(raw: string | number | null | undefined): string | null {
+  const cleaned = normalizePhone(raw);
+  if (!cleaned) return null;
+  if (!/^09\d{9}$/.test(cleaned)) {
+    return "شماره موبایل مالک باید دقیقاً ۱۱ رقم و با ۰۹ شروع شود (مثال: 09121234567).";
+  }
+  return null;
+}
+
+
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+    anchor.remove();
+  }, 0);
+}
+
+const PERSIAN_ONES = ["", "یک", "دو", "سه", "چهار", "پنج", "شش", "هفت", "هشت", "نه"];
+const PERSIAN_TEENS = ["ده", "یازده", "دوازده", "سیزده", "چهارده", "پانزده", "شانزده", "هفده", "هجده", "نوزده"];
+const PERSIAN_TENS = ["", "", "بیست", "سی", "چهل", "پنجاه", "شصت", "هفتاد", "هشتاد", "نود"];
+const PERSIAN_HUNDREDS = ["", "صد", "دویست", "سیصد", "چهارصد", "پانصد", "ششصد", "هفتصد", "هشتصد", "نهصد"];
+const PERSIAN_SCALES = ["", "هزار", "میلیون", "میلیارد", "تریلیون", "کوادریلیون"];
+
+function threeDigitToPersianWords(n: number): string {
+  if (n <= 0) return "";
+  const parts: string[] = [];
+  const h = Math.floor(n / 100);
+  const rem = n % 100;
+  if (h > 0) {
+    parts.push(PERSIAN_HUNDREDS[h]);
+  }
+  if (rem >= 10 && rem <= 19) {
+    parts.push(PERSIAN_TEENS[rem - 10]);
+  } else {
+    const t = Math.floor(rem / 10);
+    const o = rem % 10;
+    if (t > 0) parts.push(PERSIAN_TENS[t]);
+    if (o > 0) parts.push(PERSIAN_ONES[o]);
+  }
+  return parts.join(" و ");
+}
+
+export function normalizePriceDigits(raw: string | number | null | undefined, maxDigits = 18): string {
+  if (raw === null || raw === undefined) return "";
+  if (typeof raw === "number" && (!Number.isFinite(raw) || raw <= 0)) return "";
+  const ascii = String(raw)
+    .trim()
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .replace(/\.0+$/, "");
+  if (/[-−]/.test(ascii)) return "";
+  const digits = ascii.replace(/\D/g, "").replace(/^0+/, "");
+  return digits.slice(0, maxDigits);
+}
+
+export function formatPriceWithCommas(raw: string | number | null | undefined): string {
+  const digits = normalizePriceDigits(raw);
+  if (!digits) return "";
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+export function numberToPersianWords(raw: string | number | null | undefined): string {
+  const digits = normalizePriceDigits(raw);
+  if (!digits) return "";
+  const padLen = (3 - (digits.length % 3)) % 3;
+  const padded = "0".repeat(padLen) + digits;
+  const groupCount = padded.length / 3;
+  const groupParts: string[] = [];
+  for (let i = 0; i < groupCount; i++) {
+    const chunk = Number(padded.slice(i * 3, i * 3 + 3));
+    if (chunk === 0) continue;
+    const scaleIdx = groupCount - 1 - i;
+    const chunkWords = threeDigitToPersianWords(chunk);
+    const scale = PERSIAN_SCALES[scaleIdx] || "";
+    groupParts.push(scale ? `${chunkWords} ${scale}` : chunkWords);
+  }
+  return groupParts.join(" و ");
+}
+
+export function formatPriceToPersianWords(raw: string | number | null | undefined, unit = "تومان"): string {
+  const words = numberToPersianWords(raw);
+  if (!words) return "";
+  return unit ? `${words} ${unit}` : words;
+}
+

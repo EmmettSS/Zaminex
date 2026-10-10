@@ -19,8 +19,5 @@ def ensure_login_singletons(sender, **kwargs):
     if sender.name != "accounts":
         return
 
-    # Guarantee the singleton rows exist so Django admin always has an object
-    # to edit (their admins disable "add") and the login flow never races to
-    # create them on the first request.
     LoginSettings.get_solo()
     SmsProviderSettings.get_solo()

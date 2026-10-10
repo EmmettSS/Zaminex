@@ -1,5 +1,3 @@
-"""End-to-end checks for the security hardening pass."""
-
 import json
 from io import BytesIO
 
@@ -10,7 +8,7 @@ from pathlib import Path
 from rest_framework.test import APIClient
 
 from apps.accounts.models import ConsultantProfile, LoginAttempt, UserRole
-from apps.common.ai_url import UnsafeAIURL, assert_public_https_url
+from apps.analytics.ai_url import UnsafeAIURL, assert_public_https_url
 from apps.followups.models import FollowUp, FollowUpType
 from apps.listings.models import Listing
 from apps.properties.models import Property
@@ -47,10 +45,10 @@ class FollowUpAuthTests(TestCase):
 
     def test_anonymous_cannot_create_or_list_followups(self):
         client = APIClient()
-        listed = client.get("/followupa/api/followups/")
+        listed = client.get("/followups/api/followups/")
         self.assertIn(listed.status_code, (401, 403))
         created = client.post(
-            "/followupa/api/followups/",
+            "/followups/api/followups/",
             {
                 "title": "تماس",
                 "type": "Call",
@@ -68,7 +66,7 @@ class FollowUpAuthTests(TestCase):
         client = APIClient()
         client.force_authenticate(user=self.agent)
         resp = client.post(
-            "/followupa/api/followups/",
+            "/followups/api/followups/",
             {
                 "title": "تماس",
                 "type": "Call",
@@ -87,7 +85,7 @@ class FollowUpAuthTests(TestCase):
         client = APIClient()
         client.force_authenticate(user=self.agent)
         resp = client.post(
-            "/followupa/api/followups/",
+            "/followups/api/followups/",
             {
                 "title": "تماس",
                 "type": "Call",
@@ -284,10 +282,35 @@ class MediaAuthTests(TestCase):
 
         logged = Client()
         logged.force_login(self.agent)
-        # Unknown/loose files under MEDIA_ROOT are now denied by default:
-        # only known profile/property images with an owner are served.
         allowed = logged.get("/media/sec-probe.txt")
         self.assertEqual(allowed.status_code, 403)
+
+
+class MediaRootConfigurationTests(TestCase):
+    def test_media_root_is_absolute_and_exists(self):
+        root = Path(settings.MEDIA_ROOT)
+        self.assertTrue(root.is_absolute(), settings.MEDIA_ROOT)
+        self.assertTrue(root.is_dir(), settings.MEDIA_ROOT)
+
+    def test_environment_value_wins_and_is_never_cwd_relative(self):
+        from config.settings import BASE_DIR, _resolve_media_root
+
+        self.assertEqual(
+            _resolve_media_root("/var/lib/zaminex/media", BASE_DIR),
+            Path("/var/lib/zaminex/media"),
+        )
+        self.assertEqual(
+            _resolve_media_root("media-store", BASE_DIR),
+            (BASE_DIR / "media-store").resolve(),
+        )
+
+    def test_default_stays_inside_the_project_for_plain_checkouts(self):
+        import os
+
+        from config.settings import BASE_DIR
+
+        if not os.environ.get("MEDIA_ROOT", "").strip():
+            self.assertEqual(Path(settings.MEDIA_ROOT), BASE_DIR / "media")
 
 
 class PublicEndpointTests(TestCase):
@@ -320,30 +343,41 @@ class AIUrlGuardTests(TestCase):
 
 class ProtectedMediaTests(TestCase):
     def setUp(self):
+        from django.core.files.base import ContentFile
+        from apps.properties.models import PropertyImage, PropertyAppraisalReport
+
         self.admin = _user("media-admin", UserRole.ADMIN)
         self.owner = _user("media-owner", UserRole.AGENT)
         self.other = _user("media-other", UserRole.AGENT)
-        ConsultantProfile.objects.create(
-            user=self.owner, full_name="Owner", branch="B"
+        self.owner_profile = ConsultantProfile.objects.create(
+            user=self.owner,
+            full_name="Owner",
+            branch="B",
+            profile_image=ContentFile(b"avatar-bytes", name="consultants/profile/owner.png"),
         )
         self.prop = _property("MEDIA-1", self.owner)
-        # Avoid touching disk: use an in-memory file for the DB row.
-        from django.core.files.base import ContentFile
-        from apps.properties.models import PropertyImage
         self.image = PropertyImage.objects.create(
             property=self.prop,
             image=ContentFile(b"png-bytes", name="properties/images/secret.png"),
         )
         self.rel_path = self.image.image.name
+        self.appraisal = PropertyAppraisalReport.objects.create(
+            property=self.prop,
+            file=ContentFile(b"%PDF-1.4 appraisal", name="appraisal.pdf"),
+            original_filename="appraisal.pdf",
+            file_size=17,
+        )
+        self.appraisal_rel_path = self.appraisal.file.name
+        self.avatar_rel_path = self.owner_profile.profile_image.name
 
     def test_anonymous_is_denied(self):
         resp = self.client.get(f"/media/{self.rel_path}")
         self.assertEqual(resp.status_code, 403)
 
-    def test_other_consultant_cannot_download(self):
+    def test_other_consultant_can_download_image(self):
         self.client.force_login(self.other)
         resp = self.client.get(f"/media/{self.rel_path}")
-        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.status_code, 200)
 
     def test_owner_and_admin_can_download(self):
         self.client.force_login(self.owner)
@@ -364,3 +398,34 @@ class ProtectedMediaTests(TestCase):
         self.client.force_login(self.other)
         resp = self.client.get(f"/media/{self.rel_path}")
         self.assertEqual(resp.status_code, 200)
+
+    def test_other_consultant_cannot_download_appraisal_pdf(self):
+        self.client.force_login(self.other)
+        resp = self.client.get(f"/media/{self.appraisal_rel_path}")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_owner_and_admin_can_download_appraisal_pdf(self):
+        self.client.force_login(self.owner)
+        resp = self.client.get(f"/media/{self.appraisal_rel_path}")
+        self.assertEqual(resp.status_code, 200)
+        self.client.force_login(self.admin)
+        resp = self.client.get(f"/media/{self.appraisal_rel_path}")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_other_consultant_cannot_download_avatar(self):
+        self.client.force_login(self.other)
+        resp = self.client.get(f"/media/{self.avatar_rel_path}")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_owner_and_admin_can_download_avatar(self):
+        self.client.force_login(self.owner)
+        resp = self.client.get(f"/media/{self.avatar_rel_path}")
+        self.assertEqual(resp.status_code, 200)
+        self.client.force_login(self.admin)
+        resp = self.client.get(f"/media/{self.avatar_rel_path}")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_unknown_media_path_is_denied(self):
+        self.client.force_login(self.other)
+        resp = self.client.get("/media/properties/images/does-not-exist.png")
+        self.assertEqual(resp.status_code, 403)

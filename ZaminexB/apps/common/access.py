@@ -1,5 +1,3 @@
-"""Shared object-level access checks for properties and related records."""
-
 from django.db.models import Q
 
 
@@ -8,7 +6,6 @@ def user_is_admin(user) -> bool:
 
 
 def can_access_property(user, prop) -> bool:
-    """True when the user may see / attach work to this property."""
     if prop is None:
         return True
     if not user or not getattr(user, "is_authenticated", False):
@@ -19,7 +16,6 @@ def can_access_property(user, prop) -> bool:
 
 
 def can_manage_property(user, prop) -> bool:
-    """True when the user may delete or archive the property."""
     if prop is None:
         return False
     if not user or not getattr(user, "is_authenticated", False):

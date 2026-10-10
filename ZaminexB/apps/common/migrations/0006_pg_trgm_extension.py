@@ -1,16 +1,24 @@
-from django.db import migrations
+import warnings
+
+from django.db import migrations, transaction
 
 
 def enable_pg_trgm(apps, schema_editor):
-    """Enable the pg_trgm extension on PostgreSQL (used by fuzzy search).
-
-    Only runs on PostgreSQL — the extension does not exist on other backends.
-    """
     connection = schema_editor.connection
     if connection.vendor != "postgresql":
         return
-    with connection.cursor() as cursor:
-        cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    except Exception as exc:
+        warnings.warn(
+            "pg_trgm could not be enabled: %s. Fuzzy search will fall back to "
+            "a slower path. Ask the database administrator to run "
+            "'CREATE EXTENSION pg_trgm;' on this database." % exc,
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
 
 class Migration(migrations.Migration):

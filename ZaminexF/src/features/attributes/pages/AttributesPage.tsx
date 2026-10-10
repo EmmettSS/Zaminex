@@ -12,22 +12,13 @@ import { EmptyState } from "../../../shared/components/ui/EmptyState";
 import { PageHeader } from "../../../shared/components/ui/PageHeader";
 import { apiFetch, readJson, apiErrorMessage, getCsrfToken } from "../../../shared/lib/apiClient";
 import { toast } from "../../../shared/lib/utils";
+import { ConfirmModal } from "../../../shared/components/ConfirmModal";
 import { Building2, LayoutDashboard, FileText, CheckSquare, Users, BarChart3, Settings, Bell, Search, LogOut, Plus, ChevronLeft, ChevronDown, ChevronRight, Clock, CheckCircle2, AlertCircle, MoreHorizontal, MapPin, Eye, Edit2, Trash2, Archive, Phone, Mail, Calendar, TrendingUp, Activity, Command, Star, List, LayoutGrid, Download, Shield, User, Lock, Key, RefreshCw, Circle, Zap, Target, Award, Upload, Check, AlertTriangle, Info, XCircle, Loader2, CircleCheck, TriangleAlert, Columns, Send, BellRing, X, ChevronUp, SlidersHorizontal, ArrowUpRight, Layers, MessageSquare, Sparkles, GripVertical, MoreVertical, Building, History, Flame, Image, Filter, SlidersVertical } from "lucide-react";
 import { AttributeCombobox } from "../../../shared/components/ui/AttributeCombobox";
+import { CategoryCombobox } from "../../../shared/components/ui/CategoryCombobox";
 
-// =============================================================================
-//  Base data: custom fields
-//
-//  Two tabs sharing one layout, mirroring the regions screen:
-//    • ویژگی‌ها  — define a field once (label, data type, unit, options)
-//    • اتصال‌ها  — decide which property/deal types show it
-//
-//  Core attributes (متراژ، تعداد اتاق …) map to real database columns. They are
-//  listed so an administrator can see the full picture, but their type cannot
-//  be changed and they cannot be deleted, so those controls are hidden.
-// =============================================================================
 
-type TabKey = "attributes" | "bindings";
+type TabKey = "attributes" | "bindings" | "categories";
 
 type Option = { id: number; value: string; displayName: string; isActive: boolean };
 
@@ -40,6 +31,7 @@ type Attribute = {
   filterType: string;
   entity: "property" | "listing";
   unit: string;
+  category: string;
   isFacility: boolean;
   isCore: boolean;
   coreField: string;
@@ -47,6 +39,15 @@ type Attribute = {
   isActive: boolean;
   options: Option[];
   usageCount: number;
+};
+
+type AttributeCategoryRow = {
+  id: number;
+  name: string;
+  displayName: string;
+  isActive: boolean;
+  attributeCount: number;
+  isSystem: boolean;
 };
 
 type TypeRow = { id: number; name: string; displayName: string };
@@ -88,7 +89,6 @@ const FILTER_TYPES = [
 
 const HAS_OPTIONS = (dataType: string) => dataType === "select" || dataType === "multiselect";
 
-/** Sensible list-filter for a new field so binding it also shows in search. */
 const defaultFilterType = (dataType: string) => {
   if (dataType === "integer" || dataType === "decimal" || dataType === "date") return "range";
   if (dataType === "boolean") return "exists";
@@ -98,7 +98,6 @@ const defaultFilterType = (dataType: string) => {
 function AttributesPage({ csrfToken }: { csrfToken: string }) {
   const [tab, setTab] = useState<TabKey>("attributes");
 
-  // --- attributes -------------------------------------------------------
   const [attributes, setAttributes] = useState<Attribute[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -113,10 +112,25 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
     unit: "",
     filterType: "exact",
     isFacility: false,
+    searchable: true,
+    category: "",
   });
   const [adding, setAdding] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Attribute | null>(null);
+  const [pendingUnbind, setPendingUnbind] = useState<Binding | null>(null);
 
-  // --- bindings ---------------------------------------------------------
+  const [categories, setCategories] = useState<AttributeCategoryRow[]>([]);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
+  const [pendingMove, setPendingMove] = useState<{ attribute: Attribute; from: AttributeCategoryRow } | null>(null);
+  const [moveTarget, setMoveTarget] = useState("");
+  const [moving, setMoving] = useState(false);
+  const [pendingCategoryDelete, setPendingCategoryDelete] = useState<{
+    category: AttributeCategoryRow;
+    count: number;
+  } | null>(null);
+
   const [propertyTypes, setPropertyTypes] = useState<TypeRow[]>([]);
   const [dealTypes, setDealTypes] = useState<TypeRow[]>([]);
   const [bindKind, setBindKind] = useState<"property" | "listing">("property");
@@ -129,7 +143,7 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
   const fetchAttributes = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch("/basics/api/attributes/?all=1", { method: "GET" }, csrfToken);
+      const res = await apiFetch("/basics/api/attributes/?all=1", { method: "GET", cache: "no-store" }, csrfToken);
       if (res.ok) setAttributes(await res.json());
     } catch {
       toast({ type: "error", message: "خطا در دریافت ویژگی‌ها" });
@@ -147,16 +161,26 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
         setDealTypes(data.dealTypes ?? []);
       }
     } catch {
-      // Non-fatal: the type dropdown renders empty and the bind button stays
-      // disabled, which is the right outcome when the list cannot load.
+    }
+  }, [csrfToken]);
+
+  const fetchCategories = useCallback(async () => {
+    try {
+      const res = await apiFetch(
+        "/basics/api/attribute-categories/?all=1",
+        { method: "GET", cache: "no-store" },
+        csrfToken
+      );
+      if (res.ok) setCategories(await res.json());
+    } catch {
+      // Non-fatal
     }
   }, [csrfToken]);
 
   useEffect(() => { fetchAttributes(); }, [fetchAttributes]);
   useEffect(() => { fetchTypes(); }, [fetchTypes]);
+  useEffect(() => { fetchCategories(); }, [fetchCategories]);
 
-  // Default to the first type once the catalogue arrives, so the bindings tab
-  // is never shown with an empty selector.
   useEffect(() => {
     const list = bindKind === "property" ? propertyTypes : dealTypes;
     if (!bindTypeId && list.length) setBindTypeId(String(list[0].id));
@@ -181,24 +205,30 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
 
   useEffect(() => { if (tab === "bindings") fetchBindings(); }, [tab, fetchBindings]);
 
-  // --- attribute actions --------------------------------------------------
 
   const handleAdd = async () => {
-    if (!form.displayName.trim()) return;
+    if (!form.displayName.trim() || !form.category) return;
     setAdding(true);
     try {
+      const { searchable, ...attributePayload } = form;
       const res = await apiFetch(
         "/basics/api/attributes/",
-        { method: "POST", body: JSON.stringify({ ...form, displayName: form.displayName.trim() }) },
+        { method: "POST", body: JSON.stringify({ ...attributePayload, filterType: searchable ? attributePayload.filterType : "none", displayName: form.displayName.trim() }) },
         csrfToken
       );
       if (res.ok) {
         toast({ type: "success", message: "ویژگی اضافه شد." });
-        setForm({ displayName: "", dataType: "text", entity: "property", unit: "", filterType: "exact", isFacility: false });
+        setForm({ displayName: "", dataType: "text", entity: "property", unit: "", filterType: "exact", isFacility: false, searchable: true, category: "" });
+        const created = await res.json().catch(() => null);
+        if (created && created.id != null) {
+          setAttributes((prev) =>
+            prev.some((a) => a.id === created.id) ? prev : [...prev, created]
+          );
+        }
         await fetchAttributes();
       } else {
         const data = await res.json().catch(() => null);
-        toast({ type: "error", message: data?.displayName?.[0] || data?.detail || "خطا در افزودن ویژگی" });
+        toast({ type: "error", message: apiErrorMessage(data, "خطا در افزودن ویژگی") });
       }
     } catch {
       toast({ type: "error", message: "خطا در ارتباط با سرور" });
@@ -223,11 +253,149 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
     }
   };
 
-  const handleDelete = async (row: Attribute) => {
-    const warning = row.usageCount
-      ? `«${row.displayName}» به ${row.usageCount.toLocaleString("fa-IR")} نوع متصل است. حذف شود؟`
-      : `آیا از حذف ویژگی «${row.displayName}» مطمئن هستید؟`;
-    if (!confirm(warning)) return;
+
+  const toggleCategory = (name: string) => {
+    setOpenCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const handleAddCategory = async () => {
+    const displayName = newCategoryName.trim();
+    if (!displayName || addingCategory) return;
+    setAddingCategory(true);
+    try {
+      const res = await apiFetch(
+        "/basics/api/attribute-categories/",
+        { method: "POST", body: JSON.stringify({ displayName }) },
+        csrfToken
+      );
+      const data = await readJson(res).catch(() => null);
+      if (res.ok) {
+        toast({ type: "success", message: "دسته‌بندی با موفقیت اضافه شد." });
+        setNewCategoryName("");
+        if (data?.name) {
+          setOpenCategories((prev) => new Set(prev).add(data.name));
+        }
+        await fetchCategories();
+      } else {
+        toast({ type: "error", message: apiErrorMessage(data, "خطا در اضافه کردن دسته‌بندی") });
+      }
+    } catch {
+      toast({ type: "error", message: "خطا در ارتباط با سرور" });
+    } finally {
+      setAddingCategory(false);
+    }
+  };
+
+  const attributeCountByCategory = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of attributes) {
+      counts.set(a.category, (counts.get(a.category) ?? 0) + 1);
+    }
+    return counts;
+  }, [attributes]);
+
+  const selectableCategories = useMemo(
+    () =>
+      categories
+        .filter((c) => c.isActive)
+        .map((c) => ({ ...c, attributeCount: attributeCountByCategory.get(c.name) ?? 0 })),
+    [categories, attributeCountByCategory]
+  );
+
+  const moveTargetOptions = useMemo(() => {
+    if (!pendingMove) return [];
+    return categories
+      .filter((c) => c.isActive && c.name !== pendingMove.from.name)
+      .map((c) => ({ label: c.displayName, value: c.name }));
+  }, [categories, pendingMove]);
+
+  const openMoveModal = (attribute: Attribute, from: AttributeCategoryRow) => {
+    setMoveTarget("");
+    setPendingMove({ attribute, from });
+  };
+
+  const confirmMove = async () => {
+    const pending = pendingMove;
+    if (!pending || !moveTarget || moving) return;
+    const targetName =
+      categories.find((c) => c.name === moveTarget)?.displayName ?? moveTarget;
+    setMoving(true);
+    try {
+      const res = await apiFetch(
+        `/basics/api/attributes/${pending.attribute.id}/`,
+        { method: "PATCH", body: JSON.stringify({ category: moveTarget }) },
+        csrfToken
+      );
+      const data = await readJson(res).catch(() => null);
+      if (res.ok) {
+        setPendingMove(null);
+        setMoveTarget("");
+        toast({
+          type: "success",
+          message: `«${pending.attribute.displayName}» به «${targetName}» منتقل شد.`,
+        });
+
+        await Promise.all([fetchAttributes(), fetchCategories()]);
+      } else {
+        toast({ type: "error", message: apiErrorMessage(data, "خطا در تغییر دسته‌بندی") });
+      }
+    } catch {
+      toast({ type: "error", message: "خطا در ارتباط با سرور" });
+    } finally {
+      setMoving(false);
+    }
+  };
+
+  const cancelMove = () => {
+    if (moving) return;
+    setPendingMove(null);
+    setMoveTarget("");
+  };
+
+  const confirmCategoryDelete = async () => {
+    const pending = pendingCategoryDelete;
+    setPendingCategoryDelete(null);
+    if (!pending) return;
+    const { category } = pending;
+    try {
+      const res = await apiFetch(
+        `/basics/api/attribute-categories/${category.id}/`,
+        { method: "DELETE" },
+        csrfToken
+      );
+      if (res.ok || res.status === 204) {
+        toast({ type: "success", message: `دسته‌بندی «${category.displayName}» حذف شد.` });
+        setOpenCategories((prev) => {
+          const next = new Set(prev);
+          next.delete(category.name);
+          return next;
+        });
+        await Promise.all([fetchCategories(), fetchAttributes()]);
+      } else {
+        const data = await readJson(res).catch(() => null);
+        toast({
+          type: "error",
+          message: apiErrorMessage(data, `خطا در حذف دسته‌بندی «${category.displayName}»`),
+        });
+      }
+    } catch {
+      toast({ type: "error", message: "خطا در ارتباط با سرور" });
+    }
+  };
+
+  const handleDelete = (row: Attribute) => {
+    setPendingDelete(row);
+  };
+
+  const confirmDelete = async () => {
+    const row = pendingDelete;
+    if (!row) return;
+    setPendingDelete(null);
     try {
       const res = await apiFetch(`/basics/api/attributes/${row.id}/`, { method: "DELETE" }, csrfToken);
       if (res.ok || res.status === 204) {
@@ -281,7 +449,6 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
     }
   };
 
-  // --- binding actions ----------------------------------------------------
 
   const handleBind = async () => {
     if (!bindAttrId || !bindTypeId) return;
@@ -324,8 +491,14 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
     }
   };
 
-  const handleUnbind = async (row: Binding) => {
-    if (!confirm(`«${row.attributeDetail.displayName}» از این نوع حذف شود؟`)) return;
+  const handleUnbind = (row: Binding) => {
+    setPendingUnbind(row);
+  };
+
+  const confirmUnbind = async () => {
+    const row = pendingUnbind;
+    if (!row) return;
+    setPendingUnbind(null);
     const path = bindKind === "property"
       ? `/basics/api/property-type-attributes/${row.id}/`
       : `/basics/api/deal-type-attributes/${row.id}/`;
@@ -341,7 +514,6 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
     }
   };
 
-  /** Move a binding up or down by swapping its order with its neighbour. */
   const moveBinding = async (index: number, delta: number) => {
     const target = index + delta;
     if (target < 0 || target >= bindings.length) return;
@@ -352,7 +524,6 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
       { id: b.id, sortOrder: Number(a.sortOrder) },
     ];
     if (bindKind !== "property") {
-      // The deal-type endpoint has no bulk reorder; two patches are enough.
       await patchBinding(a, { sortOrder: Number(b.sortOrder) });
       await patchBinding(b, { sortOrder: Number(a.sortOrder) });
       return;
@@ -369,7 +540,6 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
     }
   };
 
-  // --- derived ------------------------------------------------------------
 
   const filtered = useMemo(() => {
     const searchFiltered = search ? fuzzyFilter(attributes, search, (a) => `${a.displayName} ${a.name} ${a.unit}`) : attributes;
@@ -379,6 +549,15 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
   const boundIds = new Set(bindings.map((b) => b.attribute));
   const bindableAttributes = attributes.filter(
     (a) => a.isActive && a.entity === bindKind && !boundIds.has(a.id)
+  );
+
+  const categoryGroups = useMemo(
+    () =>
+      categories.map((category) => ({
+        category,
+        items: attributes.filter((a) => a.category === category.name),
+      })),
+    [categories, attributes]
   );
 
   const currentTypes = bindKind === "property" ? propertyTypes : dealTypes;
@@ -396,9 +575,8 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
     <div className="p-6 max-w-4xl mx-auto space-y-5">
       <PageHeader title="مدیریت ویژگی‌ها" subtitle="تعریف فیلدهای سفارشی و اتصال آن‌ها به نوع ملک و نوع معامله" />
 
-      {/* Tabs */}
       <div className="flex items-center gap-1 p-1 bg-secondary rounded-xl w-fit">
-        {([["attributes", "ویژگی‌ها"], ["bindings", "اتصال به انواع"]] as [TabKey, string][]).map(([key, label]) => (
+        {([["attributes", "ویژگی‌ها"], ["bindings", "اتصال به انواع"], ["categories", "دسته‌بندی ویژگی‌ها"]] as [TabKey, string][]).map(([key, label]) => (
           <button
             key={key}
             type="button"
@@ -415,10 +593,9 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
 
       {tab === "attributes" && (
         <>
-          {/* Add new attribute */}
           <Card className="p-5">
             <h3 className="text-sm font-semibold mb-3">افزودن ویژگی جدید</h3>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <Input label="نام ویژگی" placeholder="مثال: جهت ساختمان" value={form.displayName} onChange={(v) => setForm((p) => ({ ...p, displayName: v }))} />
               <SelectField
                 label="نوع داده"
@@ -427,32 +604,66 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
                   ...p,
                   dataType: v,
                   isFacility: v === "boolean" ? p.isFacility : false,
-                  filterType: defaultFilterType(v),
+                  filterType: p.searchable ? defaultFilterType(v) : "none",
                 }))}
                 options={DATA_TYPES}
+              />
+              <CategoryCombobox
+                label="دسته‌بندی"
+                required
+                value={form.category}
+                onChange={(name) => setForm((p) => ({ ...p, category: name }))}
+                categories={selectableCategories}
+                error={
+                  selectableCategories.length === 0
+                    ? "دسته‌بندی فعالی وجود ندارد؛ ابتدا از تب «دسته‌بندی ویژگی‌ها» یک دسته‌بندی بسازید."
+                    : undefined
+                }
               />
             </div>
             <div className="grid grid-cols-3 gap-4 mt-4">
               <SelectField label="مربوط به" value={form.entity} onChange={(v) => setForm((p) => ({ ...p, entity: v }))} options={ENTITIES} />
-              <SelectField label="نوع فیلتر" value={form.filterType} onChange={(v) => setForm((p) => ({ ...p, filterType: v }))} options={FILTER_TYPES} />
+              <SelectField
+                label="نوع فیلتر"
+                value={form.filterType}
+                disabled={!form.searchable}
+                onChange={(v) => setForm((p) => ({ ...p, filterType: v, searchable: v !== "none" }))}
+                options={FILTER_TYPES}
+              />
               <Input label="واحد (اختیاری)" placeholder="مثال: متر مربع" value={form.unit} onChange={(v) => setForm((p) => ({ ...p, unit: v }))} />
             </div>
             <div className="flex items-center justify-between mt-4">
-              <label className="flex items-center gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form.isFacility}
-                  onChange={(e) => {
-                    const on = e.target.checked;
-                    setForm((p) => on
-                      ? { ...p, isFacility: true, dataType: "boolean", filterType: "exists" }
-                      : { ...p, isFacility: false });
-                  }}
-                  className="w-4 h-4 rounded border-border accent-primary"
-                />
-                <span className="text-sm text-foreground">جزو امکانات رفاهی است</span>
-              </label>
-              <Btn variant="primary" onClick={handleAdd} disabled={adding || !form.displayName.trim()}>
+              <div className="flex items-center gap-6">
+                <label className="flex items-center gap-2.5 cursor-pointer" title="وقتی خاموش است، این ویژگی در فیلترهای جستجوی لیست‌ها ظاهر نمی‌شود.">
+                  <input
+                    type="checkbox"
+                    checked={form.searchable}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setForm((p) => on
+                        ? { ...p, searchable: true, filterType: p.filterType === "none" ? defaultFilterType(p.dataType) : p.filterType }
+                        : { ...p, searchable: false, filterType: "none" });
+                    }}
+                    className="w-4 h-4 rounded border-border accent-primary"
+                  />
+                  <span className="text-sm text-foreground">در جستجوها لحاظ شود</span>
+                </label>
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.isFacility}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setForm((p) => on
+                        ? { ...p, isFacility: true, dataType: "boolean", filterType: p.searchable ? "exists" : "none" }
+                        : { ...p, isFacility: false });
+                    }}
+                    className="w-4 h-4 rounded border-border accent-primary"
+                  />
+                  <span className="text-sm text-foreground">جزو امکانات رفاهی است</span>
+                </label>
+              </div>
+              <Btn variant="primary" onClick={handleAdd} disabled={adding || !form.displayName.trim() || !form.category}>
                 {adding ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
                 افزودن
               </Btn>
@@ -462,7 +673,6 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
             )}
           </Card>
 
-          {/* Attribute list */}
           <Card className="overflow-hidden">
             <div className="px-5 py-3.5 border-b border-border bg-secondary/30">
               <div className="flex items-center justify-between gap-3">
@@ -539,7 +749,6 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
                       </div>
                     </div>
 
-                    {/* Options editor, shown inline for select attributes */}
                     {expanded === a.id && HAS_OPTIONS(a.dataType) && (
                       <div className="px-5 pb-4 pt-1 bg-secondary/20">
                         <div className="flex flex-wrap gap-2 mb-3">
@@ -580,7 +789,6 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
 
       {tab === "bindings" && (
         <>
-          {/* Pick a type, then attach attributes to it */}
           <Card className="p-5">
             <h3 className="text-sm font-semibold mb-3">انتخاب نوع</h3>
             <div className="grid grid-cols-2 gap-4">
@@ -680,6 +888,208 @@ function AttributesPage({ csrfToken }: { csrfToken: string }) {
             )}
           </Card>
         </>
+      )}
+
+      {tab === "categories" && (
+        <div className="space-y-5">
+          <Card className="p-5">
+            <h3 className="text-sm font-semibold mb-3">افزودن دسته‌بندی جدید</h3>
+            <div className="flex gap-3 items-end">
+              <div className="flex-1">
+                <Input
+                  label="نام دسته‌بندی"
+                  placeholder="نام دسته‌بندی را وارد کنید..."
+                  value={newCategoryName}
+                  onChange={setNewCategoryName}
+                />
+              </div>
+              <Btn
+                variant="primary"
+                onClick={handleAddCategory}
+                disabled={addingCategory || !newCategoryName.trim()}
+              >
+                {addingCategory ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                افزودن
+              </Btn>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2.5">
+              هر ویژگی همیشه در یک دسته‌بندی قرار دارد؛ دسته‌بندی‌ای که هنوز ویژگی دارد قابل حذف نیست.
+            </p>
+          </Card>
+
+          {categoryGroups.length === 0 ? (
+            <EmptyState
+              icon={<Layers size={28} />}
+              title="دسته‌بندی‌ای یافت نشد"
+              description="برای شروع، یک دسته‌بندی از فرم بالا اضافه کنید."
+            />
+          ) : (
+            categoryGroups.map(({ category, items }) => {
+              const isOpen = openCategories.has(category.name);
+              return (
+                <Card key={category.id} className="overflow-hidden">
+                  <div
+                    className={cx(
+                      "flex items-center justify-between gap-3 px-5 py-3.5 bg-secondary/30",
+                      isOpen && "border-b border-border"
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleCategory(category.name)}
+                      aria-expanded={isOpen}
+                      className="flex items-center gap-2.5 flex-1 min-w-0 text-right cursor-pointer"
+                    >
+                      <span
+                        className={cx(
+                          "w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 bg-white border transition-colors",
+                          isOpen ? "border-primary/30 text-primary" : "border-border text-muted-foreground"
+                        )}
+                      >
+                        {isOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                      </span>
+                      <span className={cx("text-sm font-semibold truncate", !category.isActive && "text-gray-400")}>
+                        {category.displayName}
+                      </span>
+                      <span
+                        className={cx(
+                          "inline-flex items-center justify-center min-w-[1.6rem] h-5 px-2 rounded-full text-xs font-bold tabular-nums flex-shrink-0",
+                          items.length
+                            ? "bg-primary/10 text-primary"
+                            : "bg-secondary text-muted-foreground"
+                        )}
+                        title={`${items.length.toLocaleString("fa-IR")} ویژگی در این دسته‌بندی`}
+                      >
+                        {items.length.toLocaleString("fa-IR")}
+                      </span>
+                      {!category.isActive && <Badge label="غیرفعال" variant="muted" />}
+                    </button>
+                    <Btn
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => setPendingCategoryDelete({ category, count: items.length })}
+                      className="!text-red-500 hover:!bg-red-50 flex-shrink-0"
+                      title="حذف دسته‌بندی"
+                    >
+                      <Trash2 size={12} />
+                    </Btn>
+                  </div>
+
+                  {isOpen &&
+                    (items.length === 0 ? (
+                      <p className="px-5 py-6 text-center text-xs text-muted-foreground">
+                        هیچ ویژگی‌ای در این دسته نیست.
+                      </p>
+                    ) : (
+                      <div className="divide-y divide-border">
+                        {items.map((a) => (
+                          <div
+                            key={a.id}
+                            className="flex items-center justify-between gap-3 px-5 py-3.5 hover:bg-secondary/20 transition-colors"
+                          >
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              <div
+                                className={cx(
+                                  "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0",
+                                  a.isActive ? "bg-emerald-100 text-emerald-600" : "bg-gray-100 text-gray-400"
+                                )}
+                              >
+                                {a.isFacility ? <Zap size={14} /> : <SlidersHorizontal size={14} />}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className={cx("text-sm font-semibold truncate", !a.isActive && "text-gray-400")}>
+                                  {a.displayName}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-0.5">{subtitleFor(a)}</p>
+                              </div>
+                            </div>
+                            <Btn
+                              variant="ghost"
+                              size="xs"
+                              onClick={() => openMoveModal(a, category)}
+                              className="flex-shrink-0"
+                              title={`حذف از ${category.displayName}`}
+                            >
+                              <XCircle size={12} />
+                              حذف از {category.displayName}
+                            </Btn>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                </Card>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      <ConfirmModal
+        open={pendingDelete !== null}
+        danger
+        title="حذف ویژگی؟"
+        message={
+          pendingDelete
+            ? pendingDelete.usageCount
+              ? `«${pendingDelete.displayName}» به ${pendingDelete.usageCount.toLocaleString("fa-IR")} نوع متصل است؛ ابتدا اتصال‌های آن را جدا کنید تا حذف امکان‌پذیر شود.`
+              : `ویژگی «${pendingDelete.displayName}» برای همیشه حذف می‌شود. آیا مطمئن هستید؟`
+            : ""
+        }
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
+      <ConfirmModal
+        open={pendingUnbind !== null}
+        danger
+        title="حذف اتصال؟"
+        message={pendingUnbind ? `«${pendingUnbind.attributeDetail.displayName}» از این نوع جدا می‌شود و دیگر در فرم آن نمایش داده نمی‌شود.` : ""}
+        onConfirm={confirmUnbind}
+        onCancel={() => setPendingUnbind(null)}
+      />
+      <ConfirmModal
+        open={pendingCategoryDelete !== null}
+        danger
+        title="حذف دسته‌بندی؟"
+        message={
+          pendingCategoryDelete
+            ? pendingCategoryDelete.count
+              ? `دسته‌بندی «${pendingCategoryDelete.category.displayName}» شامل ${pendingCategoryDelete.count.toLocaleString("fa-IR")} ویژگی است؛ تا وقتی خالی نشود حذف نمی‌شود. ابتدا ویژگی‌های آن را به دسته‌بندی دیگری منتقل کنید.`
+              : `دسته‌بندی «${pendingCategoryDelete.category.displayName}» حذف می‌شود. آیا مطمئن هستید؟`
+            : ""
+        }
+        onConfirm={confirmCategoryDelete}
+        onCancel={() => setPendingCategoryDelete(null)}
+      />
+
+      {pendingMove !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <Card className="w-full max-w-sm p-6 shadow-2xl">
+            <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 bg-amber-50">
+              <TriangleAlert size={20} className="text-amber-600" />
+            </div>
+            <h3 className="text-base font-semibold mb-1">حذف از دسته‌بندی</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              «{pendingMove.attribute.displayName}» از دسته‌بندی «{pendingMove.from.displayName}» خارج
+              می‌شود. یک ویژگی نمی‌تواند بدون دسته‌بندی بماند، بنابراین دسته‌بندی مقصد را انتخاب کنید.
+            </p>
+            <SelectField
+              label="دسته‌بندی مقصد"
+              value={moveTarget}
+              onChange={setMoveTarget}
+              options={moveTargetOptions}
+              placeholder="انتخاب دسته‌بندی"
+            />
+            <div className="flex gap-2 justify-end mt-5">
+              <Btn variant="secondary" size="sm" onClick={cancelMove} disabled={moving}>
+                انصراف
+              </Btn>
+              <Btn variant="primary" size="sm" onClick={confirmMove} disabled={moving || !moveTarget}>
+                {moving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                تایید
+              </Btn>
+            </div>
+          </Card>
+        </div>
       )}
     </div>
   );

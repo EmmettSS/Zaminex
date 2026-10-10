@@ -1,3 +1,35 @@
+from datetime import timedelta
+from unittest import mock
+
+from django.contrib import admin
+from django.test import Client
+from django.test import RequestFactory
+from django.utils import timezone
+
+from apps.accounts import sms
+from apps.accounts.forms import (
+    INACTIVE_ACCOUNT_MESSAGE,
+    SMS_LOGIN_REQUIRED_MESSAGE,
+    ZaminexAdminAuthenticationForm,
+)
+from apps.accounts.models import (
+    AdminProfile,
+    LoginMethod,
+    LoginSettings,
+    SmsLoginCode,
+    SmsProviderSettings,
+)
+from apps.accounts.sms import (
+    SmsSendError,
+    normalize_mobile,
+    set_login_method,
+)
+from apps.accounts.throttles import SmsRequestRateThrottle, SmsVerifyRateThrottle
+from apps.common.testing import CacheClearingMixin
+from apps.followups.models import FollowUp
+from apps.listings.models import Listing
+from apps.properties.models import Property
+from apps.tasks.models import Task
 from django.test import TestCase, override_settings
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -92,24 +124,7 @@ class ConsultantProfileViewSetTests(TestCase):
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
 
 
-# =============================================================================
-#  Tests for the admin-dashboard / deletion / archive-login fixes
-# =============================================================================
-
-from django.test import Client
-from django.utils import timezone
-
-from apps.accounts.forms import INACTIVE_ACCOUNT_MESSAGE
-from apps.accounts.models import AdminProfile
-from apps.followups.models import FollowUp
-from apps.listings.models import Listing
-from apps.properties.models import Property
-from apps.tasks.models import Task
-
-
 class ConsultantListAdminVisibilityTests(TestCase):
-    """Fix #1: admin accounts must never appear in the consultant list."""
-
     def setUp(self):
         self.admin = User.objects.create_user(
             username="paneladmin", password="adminpass123", role=UserRole.ADMIN
@@ -120,7 +135,6 @@ class ConsultantListAdminVisibilityTests(TestCase):
         self.agent_profile = ConsultantProfile.objects.create(
             user=self.agent, full_name="Agent One", branch="شعبه مرکزی"
         )
-        # Legacy pollution: an admin that somehow got a ConsultantProfile row.
         self.admin_profile = ConsultantProfile.objects.create(
             user=self.admin, full_name="Admin With Profile", branch="شعبه مرکزی"
         )
@@ -143,7 +157,6 @@ class ConsultantListAdminVisibilityTests(TestCase):
     def test_consultant_me_forbidden_for_admin(self):
         res = self.client_api.get(reverse("accounts:consultant-me"))
         self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
-        # No new profile should have been created for the admin either.
         self.assertEqual(
             ConsultantProfile.objects.filter(user=self.admin).count(), 1
         )
@@ -157,8 +170,6 @@ class ConsultantListAdminVisibilityTests(TestCase):
 
 
 class AdminProfileApiTests(TestCase):
-    """Fix #2: the admin's own profile API (My Profile in the admin panel)."""
-
     def setUp(self):
         self.admin = User.objects.create_user(
             username="bossadmin",
@@ -184,7 +195,7 @@ class AdminProfileApiTests(TestCase):
         self.assertTrue(AdminProfile.objects.filter(user=self.admin).exists())
 
     def test_patch_me_updates_admin_profile_and_user(self):
-        self.client_api.get("/accounts/admins/me/")  # ensure profile exists
+        self.client_api.get("/accounts/admins/me/")
         payload = {
             "first_name": "بزرگ",
             "last_name": "مدیر",
@@ -235,8 +246,6 @@ class AdminProfileApiTests(TestCase):
 
 
 class ConsultantFullDeletionTests(TestCase):
-    """Fix #3: deleting a consultant must remove it completely from the backend."""
-
     def setUp(self):
         self.admin = User.objects.create_user(
             username="deleteadmin", password="adminpass123", role=UserRole.ADMIN
@@ -247,7 +256,6 @@ class ConsultantFullDeletionTests(TestCase):
         self.profile = ConsultantProfile.objects.create(
             user=self.agent, full_name="Delete Me", branch="شعبه مرکزی"
         )
-        # Related data covering every FK type, including all PROTECT ones.
         self.property = Property.objects.create(
             title="P", internal_code="DEL-1", consultant=self.agent,
             property_type="APARTMENT", deal_type="SALE", price=1000, area=50,
@@ -272,9 +280,6 @@ class ConsultantFullDeletionTests(TestCase):
         res = self.client_api.delete(url)
         self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
 
-        # Security: deleting a consultant must be an archive, not a hard
-        # delete, so the audit trail stays intact and data is not destroyed
-        # by a mistaken click.
         self.profile.refresh_from_db()
         self.agent.refresh_from_db()
         self.assertFalse(self.profile.is_active)
@@ -301,7 +306,6 @@ class ConsultantFullDeletionTests(TestCase):
         self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
         self.assertTrue(ConsultantProfile.objects.filter(pk=other_profile.pk).exists())
         other_task.refresh_from_db()
-        # Archiving a consultant must not touch other consultants' tasks.
         self.assertEqual(other_task.assigned_to_id, self.agent.id)
 
     def test_non_admin_cannot_delete_consultant(self):
@@ -345,7 +349,6 @@ class ConsultantFullDeletionTests(TestCase):
 
 
 def extract_login_errors(html: str) -> dict:
-    """Pull the login-errors JSON payload rendered into the login page."""
     import json
     import re
 
@@ -359,8 +362,6 @@ def extract_login_errors(html: str) -> dict:
 
 
 class ArchivedConsultantLoginTests(TestCase):
-    """Fix #4: archived consultants cannot log in and see a clear message."""
-
     def setUp(self):
         self.agent = User.objects.create_user(
             username="archivedagent", password="agentpass123", role=UserRole.AGENT
@@ -387,7 +388,7 @@ class ArchivedConsultantLoginTests(TestCase):
         self.profile.is_active = False
         self.profile.save()
         res = self._login("archivedagent", "agentpass123")
-        self.assertEqual(res.status_code, 200)  # re-rendered login page
+        self.assertEqual(res.status_code, 200)
         errors = extract_login_errors(res.content.decode("utf-8"))
         self.assertIn(INACTIVE_ACCOUNT_MESSAGE, errors.get("__all__", []))
 
@@ -427,13 +428,11 @@ class ArchivedConsultantLoginTests(TestCase):
         self.assertEqual(res.status_code, 200)
         errors = extract_login_errors(res.content.decode("utf-8"))
         self.assertNotIn(INACTIVE_ACCOUNT_MESSAGE, errors.get("__all__", []))
-        self.assertTrue(errors.get("__all__"))  # generic invalid-login error
+        self.assertTrue(errors.get("__all__"))
 
 
 @override_settings(LOGIN_FAILURE_LIMIT=5, LOGIN_LOCKOUT_SECONDS=600, LOGIN_FAILURE_WINDOW_SECONDS=900)
 class LoginAttemptLockoutTests(TestCase):
-    """Login should be temporarily blocked after repeated failed attempts."""
-
     def setUp(self):
         self.user = User.objects.create_user(
             username="limitedagent", password="agentpass123", role=UserRole.AGENT
@@ -493,18 +492,6 @@ class LoginAttemptLockoutTests(TestCase):
 
 
 class LogoutFlowTests(TestCase):
-    """Logout is the SPA's only POST navigation, so it must keep working with
-    every token source the frontend legitimately uses (the raw csrftoken
-    cookie secret and the server-rendered masked page token) while staying a
-    CSRF-protected POST.
-
-    These tests mirror the browser flow 1:1 with CSRF enforcement enabled:
-      - the login page renders `csrfToken` (masked) into `initial-data`,
-      - the logout handler refreshes the cookie through a CSRF-issuing GET
-        and then POSTs the token read from the cookie,
-      - a missing cookie/token must never silently log the user out.
-    """
-
     def setUp(self):
         self.user = User.objects.create_user(
             username="logoutuser",
@@ -553,12 +540,9 @@ class LogoutFlowTests(TestCase):
         client.cookies.pop("csrftoken", None)
         res = client.post(reverse("accounts:logout"), {})
         self.assertEqual(res.status_code, 403)
-        # The session must survive a failed logout attempt: the user is still
-        # served the authenticated dashboard.
         self.assertEqual(client.get("/").status_code, 200)
 
     def test_logout_with_cookie_token_succeeds(self):
-        """The JS reads the raw cookie secret and posts it — must be accepted."""
         client = self._logged_in_client()
         cookie_token = client.cookies.get("csrftoken").value
         res = client.post(
@@ -566,13 +550,11 @@ class LogoutFlowTests(TestCase):
         )
         self.assertEqual(res.status_code, 302)
         self.assertEqual(res["Location"], reverse("accounts:login"))
-        # The server-side session is actually destroyed.
         follow = client.get("/")
         self.assertEqual(follow.status_code, 302)
         self.assertTrue(follow["Location"].startswith(reverse("accounts:login")))
 
     def test_logout_with_server_rendered_page_token_succeeds(self):
-        """The masked token rendered into `initial-data` must also be accepted."""
         client = self._logged_in_client()
         dash = client.get("/")
         page_token = self._page_csrf_token(dash)
@@ -582,55 +564,22 @@ class LogoutFlowTests(TestCase):
         self.assertEqual(res.status_code, 302)
 
     def test_logout_after_cookie_refresh_succeeds(self):
-        """Broken browser state (csrftoken cookie lost): the frontend now
-        refreshes the cookie through a CSRF-issuing GET before posting, and
-        the subsequent logout succeeds instead of returning a raw 403."""
         client = self._logged_in_client()
         client.cookies.pop("csrftoken", None)
-        # Step 1 of the new frontend flow: refresh the cookie.
         client.get(reverse("accounts:login"))
         fresh_token = client.cookies.get("csrftoken").value
-        # Step 2: POST it like every other API call.
         res = client.post(
             reverse("accounts:logout"), {"csrfmiddlewaretoken": fresh_token}
         )
         self.assertEqual(res.status_code, 302)
 
     def test_logout_still_rejects_wrong_token(self):
-        """A forged token with a valid cookie must be rejected (no CSRF hole)."""
         client = self._logged_in_client()
         res = client.post(
             reverse("accounts:logout"),
             {"csrfmiddlewaretoken": "x" * 32},
         )
         self.assertEqual(res.status_code, 403)
-
-
-# =============================================================================
-#  SMS OTP login (اصلاحیه دوم): request/verify flow, fallback, method switch
-# =============================================================================
-
-from datetime import timedelta
-from unittest import mock
-
-from django.core.cache import cache
-
-from apps.accounts import sms
-from apps.accounts.forms import (
-    SMS_LOGIN_REQUIRED_MESSAGE,
-    ZaminexAdminAuthenticationForm,
-)
-from apps.accounts.models import (
-    LoginMethod,
-    LoginSettings,
-    SmsLoginCode,
-    SmsProviderSettings,
-)
-from apps.accounts.sms import (
-    SmsSendError,
-    normalize_mobile,
-    set_login_method,
-)
 
 
 class MobileNormalizationTests(TestCase):
@@ -646,12 +595,9 @@ class MobileNormalizationTests(TestCase):
                 normalize_mobile(bad)
 
 
-class SmsLoginFlowTests(TestCase):
+class SmsLoginFlowTests(CacheClearingMixin, TestCase):
     def setUp(self):
-        # Throttle history lives in the shared locmem cache across tests;
-        # reset it so one test's requests never throttle the next one.
-        cache.clear()
-
+        super().setUp()
         self.client = APIClient()
         self.user = User.objects.create_user(
             username="smsagent", password="agentpass123", role=UserRole.AGENT
@@ -664,23 +610,27 @@ class SmsLoginFlowTests(TestCase):
             is_active=True,
         )
         set_login_method(LoginMethod.SMS)
+        self.addCleanup(set_login_method, LoginMethod.PASSWORD)
 
-        # The view binds `send_verification_code` into its own namespace
-        # (from-import), so patch where it is *used*, not where it is defined.
         patcher_send = mock.patch("apps.accounts.views.send_verification_code")
-        patcher_gen = mock.patch("apps.accounts.sms._generate_code", return_value="123456")
+        patcher_gen = mock.patch(
+            "apps.accounts.sms._generate_code", return_value="123456"
+        )
         self.mock_send = patcher_send.start()
         self.mock_gen = patcher_gen.start()
         self.addCleanup(patcher_send.stop)
         self.addCleanup(patcher_gen.stop)
-        self.addCleanup(lambda: set_login_method(LoginMethod.PASSWORD))
 
     def _request(self, mobile="09123456789"):
-        return self.client.post("/accounts/sms-login/request/", {"mobile": mobile}, format="json")
+        return self.client.post(
+            "/accounts/sms-login/request/", {"mobile": mobile}, format="json"
+        )
 
     def _verify(self, code="123456", mobile="09123456789"):
         return self.client.post(
-            "/accounts/sms-login/verify/", {"mobile": mobile, "code": code}, format="json"
+            "/accounts/sms-login/verify/",
+            {"mobile": mobile, "code": code},
+            format="json",
         )
 
     def test_request_code_sends_sms(self):
@@ -688,6 +638,12 @@ class SmsLoginFlowTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.mock_send.assert_called_once_with("09123456789", "123456")
         self.assertTrue(SmsLoginCode.objects.filter(mobile="09123456789").exists())
+
+    def test_issued_code_is_never_stored_in_plain_text(self):
+        self._request()
+        record = SmsLoginCode.objects.get(mobile="09123456789")
+        self.assertNotEqual(record.code_hash, "123456")
+        self.assertTrue(record.code_hash)
 
     def test_request_code_normalizes_mobile(self):
         res = self._request(mobile="+989123456789")
@@ -698,6 +654,7 @@ class SmsLoginFlowTests(TestCase):
         res = self._request(mobile="09999999999")
         self.assertEqual(res.status_code, 200)
         self.mock_send.assert_not_called()
+        self.assertFalse(SmsLoginCode.objects.filter(mobile="09999999999").exists())
 
     def test_request_code_invalid_mobile(self):
         res = self._request(mobile="123")
@@ -710,7 +667,15 @@ class SmsLoginFlowTests(TestCase):
 
     def test_resend_cooldown(self):
         self.assertEqual(self._request().status_code, 200)
-        self.assertEqual(self._request().status_code, 429)
+        res = self._request()
+        self.assertEqual(res.status_code, 429)
+        self.assertIn("ثانیه", res.data["detail"])
+
+    def test_provider_failure_is_reported_to_the_client(self):
+        self.mock_send.side_effect = SmsSendError("خطای ارسال")
+        res = self._request()
+        self.assertEqual(res.status_code, 502)
+        self.assertIn("خطای ارسال", res.data["detail"])
 
     def test_verify_correct_code_logs_in(self):
         self._request()
@@ -720,12 +685,27 @@ class SmsLoginFlowTests(TestCase):
         code = SmsLoginCode.objects.get(mobile="09123456789")
         self.assertIsNotNone(code.consumed_at)
 
+    def test_verify_returns_safe_next_url(self):
+        self._request()
+        res = self.client.post(
+            "/accounts/sms-login/verify/",
+            {"mobile": "09123456789", "code": "123456", "next": "https://evil.example/x"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["next"], "/")
+
     def test_verify_wrong_code(self):
         self._request()
         res = self._verify(code="000000")
         self.assertEqual(res.status_code, 400)
         code = SmsLoginCode.objects.get(mobile="09123456789")
         self.assertEqual(code.attempts, 1)
+
+    def test_verify_malformed_code(self):
+        self._request()
+        res = self._verify(code="12a456")
+        self.assertEqual(res.status_code, 400)
 
     def test_verify_too_many_attempts_invalidates_code(self):
         self._request()
@@ -742,6 +722,11 @@ class SmsLoginFlowTests(TestCase):
         code.save(update_fields=["expires_at"])
         res = self._verify()
         self.assertEqual(res.status_code, 400)
+        self.assertIn("منقضی", res.data["detail"])
+
+    def test_verify_without_any_code(self):
+        res = self._verify()
+        self.assertEqual(res.status_code, 400)
 
     def test_archived_consultant_cannot_verify(self):
         self.profile.is_active = False
@@ -750,6 +735,44 @@ class SmsLoginFlowTests(TestCase):
         res = self._verify()
         self.assertEqual(res.status_code, 400)
         self.assertIn(INACTIVE_ACCOUNT_MESSAGE, res.data["detail"])
+
+    def test_deactivated_admin_profile_cannot_verify(self):
+        admin = User.objects.create_user(
+            username="smsroot", password="rootpass123", role=UserRole.ADMIN
+        )
+        AdminProfile.objects.create(
+            user=admin, full_name="Root", mobile="09123456780", is_active=False
+        )
+        sms.issue_code("09123456780")
+        res = self.client.post(
+            "/accounts/sms-login/verify/",
+            {"mobile": "09123456780", "code": "123456"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("غیرفعال", res.data["detail"])
+
+    def test_verify_disabled_when_password_active(self):
+        self._request()
+        set_login_method(LoginMethod.PASSWORD)
+        res = self._verify()
+        self.assertEqual(res.status_code, 400)
+
+    def test_consumed_code_cannot_be_replayed(self):
+        self._request()
+        self.assertEqual(self._verify().status_code, 200)
+        res = self._verify()
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("قبلاً استفاده شده", res.data["detail"])
+
+    def test_mobile_wide_failure_cap_blocks_correct_code(self):
+        self._request()
+        for _ in range(sms.mobile_attempt_cap()):
+            self._verify(code="000000")
+            SmsLoginCode.objects.filter(mobile="09123456789").update(attempts=0)
+        res = self._verify(code="123456")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("متوقف", res.data["detail"])
 
 
 class SmsProviderFallbackTests(TestCase):
@@ -762,24 +785,38 @@ class SmsProviderFallbackTests(TestCase):
         config.kavenegar_message = "code: {code}"
         config.save()
 
+    def test_keys_are_not_stored_in_plain_text(self):
+        config = SmsProviderSettings.objects.get(pk=1)
+        self.assertNotEqual(config.smsir_api_key, "smsir-key")
+        self.assertTrue(config.smsir_api_key.startswith("enc:v1:"))
+        self.assertEqual(config.smsir_api_key_plain, "smsir-key")
+        self.assertEqual(config.kavenegar_api_key_plain, "kave-key")
+
     def test_kavenegar_used_when_smsir_fails(self):
-        with mock.patch("apps.accounts.sms._smsir_send", side_effect=SmsSendError("down")), \
-                mock.patch("apps.accounts.sms._kavenegar_send") as kave:
+        with mock.patch("apps.accounts.sms._smsir_send", side_effect=SmsSendError("down")), mock.patch(
+            "apps.accounts.sms._kavenegar_send"
+        ) as kave:
             sms.send_verification_code("09123456789", "123456")
             kave.assert_called_once()
 
     def test_error_when_both_providers_fail(self):
-        with mock.patch("apps.accounts.sms._smsir_send", side_effect=SmsSendError("down")), \
-                mock.patch("apps.accounts.sms._kavenegar_send", side_effect=SmsSendError("down")):
+        with mock.patch("apps.accounts.sms._smsir_send", side_effect=SmsSendError("down")), mock.patch(
+            "apps.accounts.sms._kavenegar_send", side_effect=SmsSendError("down")
+        ):
             with self.assertRaises(SmsSendError):
                 sms.send_verification_code("09123456789", "123456")
 
+    def test_is_sms_configured_requires_key_and_template(self):
+        self.assertTrue(sms.is_sms_configured())
+        config = SmsProviderSettings.get_solo()
+        config.smsir_template_id = ""
+        config.save()
+        self.assertFalse(sms.is_sms_configured())
 
-class LoginMethodEnforcementTests(TestCase):
+
+class LoginMethodEnforcementTests(CacheClearingMixin, TestCase):
     def setUp(self):
-        cache.clear()
-        # The admin login form requires is_staff in addition to the ADMIN
-        # role, so the fixture must be staff (create_user alone is not).
+        super().setUp()
         self.user = User.objects.create_user(
             username="switcher",
             password="adminpass123",
@@ -787,7 +824,7 @@ class LoginMethodEnforcementTests(TestCase):
             is_staff=True,
         )
         AdminProfile.objects.create(user=self.user, full_name="Switcher", branch="شعبه مرکزی")
-        self.addCleanup(lambda: set_login_method(LoginMethod.PASSWORD))
+        self.addCleanup(set_login_method, LoginMethod.PASSWORD)
 
     def test_password_login_blocked_when_sms_active(self):
         set_login_method(LoginMethod.SMS)
@@ -798,12 +835,27 @@ class LoginMethodEnforcementTests(TestCase):
         errors = extract_login_errors(res.content.decode("utf-8"))
         self.assertIn(SMS_LOGIN_REQUIRED_MESSAGE, errors.get("__all__", []))
 
+    def test_login_page_renders_sms_mode(self):
+        set_login_method(LoginMethod.SMS)
+        res = Client().get("/accounts/login/")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.context["initial_data"]["loginMethod"], LoginMethod.SMS)
+        self.assertIn(b'"loginMethod": "sms"', res.content)
+
+    def test_login_page_defaults_to_password_mode(self):
+        res = Client().get("/accounts/login/")
+        self.assertEqual(res.context["initial_data"]["loginMethod"], LoginMethod.PASSWORD)
+
     def test_admin_form_still_allows_password_when_sms_active(self):
         set_login_method(LoginMethod.SMS)
         form = ZaminexAdminAuthenticationForm(
             data={"username": "switcher", "password": "adminpass123"}
         )
         self.assertTrue(form.is_valid())
+
+    def test_login_options_requires_authentication(self):
+        res = APIClient().get("/accounts/login-options/")
+        self.assertEqual(res.status_code, 403)
 
     def test_login_options_endpoint_admin_only(self):
         agent = User.objects.create_user(
@@ -814,6 +866,13 @@ class LoginMethodEnforcementTests(TestCase):
         res = client.patch("/accounts/login-options/", {"method": "sms"}, format="json")
         self.assertEqual(res.status_code, 403)
 
+    def test_login_options_rejects_unknown_method(self):
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        res = client.patch("/accounts/login-options/", {"method": "carrier-pigeon"}, format="json")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(LoginSettings.get_solo().method, LoginMethod.PASSWORD)
+
     def test_login_options_roundtrip(self):
         client = APIClient()
         client.force_authenticate(user=self.user)
@@ -822,3 +881,121 @@ class LoginMethodEnforcementTests(TestCase):
         self.assertEqual(LoginSettings.get_solo().method, LoginMethod.SMS)
         res = client.get("/accounts/login-options/")
         self.assertEqual(res.data["method"], LoginMethod.SMS)
+        self.assertFalse(res.data["smsConfigured"])
+
+
+class SmsThrottleIdentTests(TestCase):
+    def test_ident_prefers_forwarded_for(self):
+        request = RequestFactory().post(
+            "/", HTTP_X_FORWARDED_FOR="203.0.113.9, 10.0.0.1"
+        )
+        self.assertEqual(
+            SmsRequestRateThrottle().get_ident(request), "203.0.113.9"
+        )
+
+    def test_ident_falls_back_to_remote_addr(self):
+        request = RequestFactory().post("/", REMOTE_ADDR="198.51.100.7")
+        self.assertEqual(SmsVerifyRateThrottle().get_ident(request), "198.51.100.7")
+
+
+class SmsAdminTests(TestCase):
+    def setUp(self):
+        self.superuser = User.objects.create_superuser(
+            username="smsroot",
+            email="smsroot@example.com",
+            password="adminpass123",
+            role=UserRole.ADMIN,
+        )
+        self.client = Client()
+        self.client.force_login(self.superuser)
+
+    def _provider_payload(self, **overrides):
+        payload = {
+            "smsir_api_key": "",
+            "smsir_line_number": "10008011",
+            "smsir_template_id": "77",
+            "kavenegar_api_key": "",
+            "kavenegar_sender": "20006535",
+            "kavenegar_template_name": "",
+            "kavenegar_message": "کد: {code}",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_get_solo_is_idempotent(self):
+        settings_row = LoginSettings.get_solo()
+        self.assertEqual(LoginSettings.get_solo().pk, settings_row.pk)
+        self.assertEqual(settings_row.method, LoginMethod.PASSWORD)
+        provider_row = SmsProviderSettings.get_solo()
+        self.assertEqual(SmsProviderSettings.get_solo().pk, provider_row.pk)
+        self.assertEqual(SmsProviderSettings.objects.count(), 1)
+
+    def test_secret_fields_are_not_echoed_back(self):
+        config = SmsProviderSettings.get_solo()
+        config.smsir_api_key = "secret-key"
+        config.kavenegar_api_key = "kave-secret"
+        config.save()
+
+        res = self.client.get(f"/admin/accounts/smsprovidersettings/{config.pk}/change/")
+        self.assertEqual(res.status_code, 200)
+        self.assertNotContains(res, "secret-key")
+        self.assertNotContains(res, "kave-secret")
+        self.assertNotContains(res, "enc:v1:")
+
+    def test_saving_form_without_keys_keeps_existing_secrets(self):
+        config = SmsProviderSettings.get_solo()
+        config.smsir_api_key = "secret-key"
+        config.smsir_template_id = "77"
+        config.save()
+        stored = SmsProviderSettings.objects.get(pk=config.pk).smsir_api_key
+
+        res = self.client.post(
+            f"/admin/accounts/smsprovidersettings/{config.pk}/change/",
+            self._provider_payload(smsir_template_id="78"),
+        )
+        self.assertEqual(res.status_code, 302)
+
+        config.refresh_from_db()
+        self.assertEqual(config.smsir_api_key, stored)
+        self.assertEqual(config.smsir_api_key_plain, "secret-key")
+        self.assertEqual(config.smsir_template_id, "78")
+
+    def test_typing_a_new_key_replaces_the_stored_one(self):
+        config = SmsProviderSettings.get_solo()
+        res = self.client.post(
+            f"/admin/accounts/smsprovidersettings/{config.pk}/change/",
+            self._provider_payload(smsir_api_key="fresh-key"),
+        )
+        self.assertEqual(res.status_code, 302)
+
+        config.refresh_from_db()
+        self.assertTrue(config.smsir_api_key.startswith("enc:v1:"))
+        self.assertEqual(config.smsir_api_key_plain, "fresh-key")
+
+    def test_singletons_cannot_be_added_or_deleted_once_present(self):
+        request = self.client.get("/admin/accounts/loginsettings/").wsgi_request
+        for model in (LoginSettings, SmsProviderSettings):
+            row = model.get_solo()
+            model_admin = admin.site._registry[model]
+            self.assertFalse(model_admin.has_add_permission(request))
+            self.assertFalse(model_admin.has_delete_permission(request, row))
+        self.assertEqual(
+            self.client.get("/admin/accounts/loginsettings/add/").status_code, 403
+        )
+
+    def test_login_code_admin_exposes_no_editable_field(self):
+        model_admin = admin.site._registry[SmsLoginCode]
+        stored = {
+            field.name
+            for field in SmsLoginCode._meta.get_fields()
+            if field.concrete and field.name != "id"
+        }
+        self.assertEqual(set(model_admin.readonly_fields), stored)
+
+    def test_login_code_change_page_hides_the_plain_code(self):
+        code = sms.issue_code("09123456789")
+        record = SmsLoginCode.objects.get(mobile="09123456789")
+        self.assertNotEqual(record.code_hash, code)
+        res = self.client.get(f"/admin/accounts/smslogincode/{record.pk}/change/")
+        self.assertEqual(res.status_code, 200)
+        self.assertNotContains(res, f">{code}<")

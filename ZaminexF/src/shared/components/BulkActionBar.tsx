@@ -28,8 +28,5 @@ function BulkActionBar({ count, onArchive, onDelete, onClear }: { count: number;
   );
 }
 
-// =============================================================================
-//  Confirm Modal
-// =============================================================================
 
 export { BulkActionBar };

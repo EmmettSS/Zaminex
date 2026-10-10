@@ -146,11 +146,9 @@ function EditConsultantPage({
           <Input label="یادداشت" value={form.notes} onChange={(v) => set("notes", v)} />
         </div>
 
-        {/* Profile Image Upload */}
         <div className="space-y-3">
           <label className="text-sm font-medium text-foreground">تصویر پروفایل</label>
           <div className="flex items-start gap-4">
-            {/* Preview */}
             <div className="flex-shrink-0">
               {imagePreview ? (
                 <div className="relative">
@@ -178,7 +176,6 @@ function EditConsultantPage({
               )}
             </div>
 
-            {/* Upload Area */}
             <div className="flex-1">
               <div
                 onClick={() => fileInputRef.current?.click()}
@@ -223,8 +220,5 @@ function EditConsultantPage({
   );
 }
 
-// =============================================================================
-//  Follow-Ups
-// =============================================================================
 
 export { EditConsultantPage };

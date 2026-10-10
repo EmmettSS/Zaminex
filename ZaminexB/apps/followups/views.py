@@ -18,12 +18,6 @@ from .serializers import (
 
 
 class FollowUpViewSet(viewsets.ModelViewSet):
-    # Ordering: newest *activity* first. A follow-up that was created or
-    # edited most recently surfaces at the top of the list and of the
-    # dashboard "پیگیری‌های پیش‌رو" widget (which slices the first few rows),
-    # so the order updates dynamically after every create/update/complete.
-    # ``-created_at`` is the deterministic tie-breaker for records changed in
-    # the same instant.
     queryset = FollowUp.objects.select_related("consultant", "property").all().order_by("-updated_at", "-created_at")
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = LargeListPagination
@@ -54,9 +48,6 @@ class FollowUpViewSet(viewsets.ModelViewSet):
         status_value = self.request.query_params.get("status")
         type_value = self.request.query_params.get("type")
 
-        # The archived/active split applies to list responses only. Applying it
-        # to detail routes as well would make an archived follow-up unreachable
-        # by its own id, so it could never be unarchived or deleted.
         if self.action == "list":
             if archived in ("true", "1", "yes"):
                 queryset = queryset.filter(is_archived=True)
@@ -75,11 +66,6 @@ class FollowUpViewSet(viewsets.ModelViewSet):
         if type_value:
             queryset = queryset.filter(follow_up_type=type_value)
 
-        # Inclusive scheduled-date range. The UI sends Gregorian YYYY-MM-DD
-        # (already converted from Jalali); each endpoint is interpreted as a
-        # whole Asia/Tehran calendar day so records in the first hours after
-        # Tehran midnight are matched correctly, regardless of the server's
-        # UTC timezone. ``scheduled_at`` already has a single-column index.
         scheduled_from = parse_gregorian_date(
             self.request.query_params.get("scheduledDateFrom"), "scheduledDateFrom"
         )

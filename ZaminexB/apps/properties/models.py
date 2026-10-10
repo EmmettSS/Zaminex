@@ -1,7 +1,10 @@
 import os
 import uuid
 
-from django.db import models
+from django.db import models, transaction
+from django.db.models import BigIntegerField, Max
+from django.db.models.functions import Cast, Substr
+from django.db.utils import IntegrityError
 
 from .validators import validate_appraisal_pdf, validate_property_image
 from django.conf import settings
@@ -16,26 +19,26 @@ class ActivePropertyManager(models.Manager):
 
 class Property(models.Model):
     class Status(models.TextChoices):
-        AVAILABLE = "AVAILABLE", "Available"
-        RESERVED = "RESERVED", "Reserved"
-        SOLD = "SOLD", "Sold"
-        INACTIVE = "INACTIVE", "Archived"
+        AVAILABLE = "AVAILABLE", "آماده واگذاری"
+        RESERVED = "RESERVED", "رزرو شده"
+        SOLD = "SOLD", "فروخته/واگذارشده"
+        INACTIVE = "INACTIVE", "بایگانی‌شده"
 
     class DealType(models.TextChoices):
-        SALE = "SALE", "Sale"
-        RENT = "RENT", "Rent"
+        SALE = "SALE", "فروش"
+        RENT = "RENT", "اجاره"
 
     class PropertyType(models.TextChoices):
-        APARTMENT = "APARTMENT", "Apartment"
-        VILLA = "VILLA", "Villa"
-        TOWNHOUSE = "TOWNHOUSE", "Townhouse"
-        STUDIO = "STUDIO", "Studio"
-        PENTHOUSE = "PENTHOUSE", "Penthouse"
-        COMMERCIAL = "COMMERCIAL", "Commercial"
-        OFFICE = "OFFICE", "Office"
-        SHOP = "SHOP", "Shop"
-        LAND = "LAND", "Land"
-        OTHER = "OTHER", "Other"
+        APARTMENT = "APARTMENT", "آپارتمان"
+        VILLA = "VILLA", "ویلا"
+        TOWNHOUSE = "TOWNHOUSE", "خانه ویلایی"
+        STUDIO = "STUDIO", "استودیو"
+        PENTHOUSE = "PENTHOUSE", "پنت‌هاوس"
+        COMMERCIAL = "COMMERCIAL", "تجاری/اداری"
+        OFFICE = "OFFICE", "دفتر کار"
+        SHOP = "SHOP", "مغازه"
+        LAND = "LAND", "زمین"
+        OTHER = "OTHER", "سایر"
 
     title = models.CharField(max_length=255, verbose_name="عنوان ملک")
     internal_code = models.CharField(max_length=50, unique=True, verbose_name="کد داخلی")
@@ -48,19 +51,12 @@ class Property(models.Model):
         verbose_name="مشاور مسئول",
     )
 
-    # Legacy hard-coded column. Superseded by `property_type_ref` below and
-    # removed once every reader has been migrated; kept in place for now so
-    # this phase changes no behaviour. See apps/basics/models.py.
     property_type = models.CharField(
         max_length=20,
         choices=PropertyType.choices,
         verbose_name="نوع ملک (قدیمی)",
     )
 
-    # --- reference data (phase 2) ------------------------------------------
-    # Nullable during the transition: existing rows are backfilled by the
-    # `link_properties_to_basics` command, and the columns above stay
-    # authoritative until phase 3 switches the readers over.
     property_usage = models.ForeignKey(
         "basics.PropertyUsage",
         on_delete=models.PROTECT,
@@ -84,15 +80,6 @@ class Property(models.Model):
         verbose_name="نوع معامله",
     )
 
-    # Deprecated. Pricing belongs to the listing (Listing.sale_price / deposit
-    # / monthly_rent) because one property can be advertised for sale and for
-    # rent at once.
-    #
-    # Nothing reads this column directly any more: every caller goes through
-    # `apps.common.metrics.effective_sale_price`, which prefers the property's
-    # sale listings and only falls back here for records created before the
-    # split. It is retained so those historical figures stay readable, and can
-    # be dropped once no row relies on the fallback.
     price = models.DecimalField(
         max_digits=18,
         decimal_places=0,
@@ -106,17 +93,10 @@ class Property(models.Model):
     built_year = models.PositiveIntegerField(null=True, blank=True, verbose_name="سال ساخت")
 
     address = models.TextField(verbose_name="آدرس کامل")
-    # Legacy free-text neighbourhood. Superseded by the `district` foreign key
-    # below; still written on save so existing readers, search filters and the
-    # market-metrics grouping keep working unchanged.
     neighborhood = models.CharField(
         max_length=255, blank=True, verbose_name="محله / منطقه (متنی)"
     )
 
-    # --- location (phase 4) -------------------------------------------------
-    # Province and city are reachable through `district.city.province`, so only
-    # the leaf is stored. Nullable during the transition: existing rows are
-    # backfilled by `migrate_districts_to_hierarchy`.
     district = models.ForeignKey(
         "basics.District",
         on_delete=models.PROTECT,
@@ -155,10 +135,6 @@ class Property(models.Model):
         help_text="وقتی فعال باشد، همه مشاوران ملک را می‌بینند و می‌توانند ویرایش کنند (به جز تغییر مشاور مسئول).",
     )
 
-    # --- owner contact (اطلاعات مالک) --------------------------------------
-    # Fields are nullable at the database level so historical rows and the
-    # REST API stay compatible during the transition; the write path enforces
-    # them (the create serializer and the front-end form require them).
     owner_first_name = models.CharField(
         max_length=100, blank=True, default="", verbose_name="نام مالک"
     )
@@ -179,18 +155,26 @@ class Property(models.Model):
         verbose_name = "ملک"
         verbose_name_plural = "املاک"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at"], name="idx_property_created_at"),
+            models.Index(
+                fields=["status", "-created_at"], name="idx_property_status_created"
+            ),
+            models.Index(
+                fields=["deal_type", "-created_at"], name="idx_property_deal_created"
+            ),
+            models.Index(fields=["property_type"], name="idx_property_type"),
+            models.Index(fields=["area"], name="idx_property_area"),
+            models.Index(fields=["price"], name="idx_property_price"),
+        ]
 
     def __str__(self):
         return self.title
 
     def save(self, *args, **kwargs):
-        """Mirror the linked district's name into the legacy text column and
-        auto-generate the sequential internal_code for new instances.
-        """
-        if self.pk is None:
-            # Auto-generate sequential internal_code for new properties
-            if not self.internal_code or not str(self.internal_code).startswith("ZF_"):
-                self.internal_code = _generate_next_internal_code()
+        needs_code = self.pk is None and not _has_sequential_code(self.internal_code)
+        if needs_code:
+            self.internal_code = _generate_next_internal_code()
 
         if self.district_id:
             name = self.district.display_name
@@ -199,51 +183,66 @@ class Property(models.Model):
                 update_fields = kwargs.get("update_fields")
                 if update_fields is not None and "neighborhood" not in update_fields:
                     kwargs["update_fields"] = list(update_fields) + ["neighborhood"]
-        super().save(*args, **kwargs)
+
+        if not needs_code:
+            super().save(*args, **kwargs)
+            return
+
+        for attempt in range(CODE_INSERT_ATTEMPTS):
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError:
+                if attempt == CODE_INSERT_ATTEMPTS - 1:
+                    raise
+                self.internal_code = _generate_next_internal_code()
+
+
+CODE_PREFIX = "ZF_"
+FIRST_CODE_VALUE = 1111
+
+MAX_CODE_VALUE = 99999
+
+CODE_INSERT_ATTEMPTS = 5
+
+_MIN_WIDTH = len(str(FIRST_CODE_VALUE))
+_MAX_WIDTH = len(str(MAX_CODE_VALUE))
+_CODE_REGEX = rf"^{CODE_PREFIX}[1-9]{{{_MIN_WIDTH},{_MAX_WIDTH}}}$"
+
+
+def _has_sequential_code(value):
+    return bool(value) and str(value).startswith(CODE_PREFIX)
+
+
+def _highest_code_value():
+    highest = (
+        Property.objects.filter(internal_code__regex=_CODE_REGEX)
+        .annotate(
+            code_value=Cast(
+                Substr("internal_code", len(CODE_PREFIX) + 1), BigIntegerField()
+            )
+        )
+        .aggregate(highest=Max("code_value"))["highest"]
+    )
+    return FIRST_CODE_VALUE - 1 if highest is None else highest
 
 
 def _generate_next_internal_code():
-    """Generate the next sequential ZF_XXXX internal code.
+    value = _highest_code_value() + 1
+    while "0" in str(value) and value <= MAX_CODE_VALUE:
+        value += 1
 
-    Sequence rules:
-    - Starts at ZF_1111
-    - Only digits 1-9 (no zero allowed anywhere)
-    - Increases sequentially; skips any value containing digit 0
-    - Always globally unique
-    """
-    existing = (
-        Property.objects.filter(internal_code__regex=r"^ZF_[1-9]{4}$")
-        .values_list("internal_code", flat=True)
-    )
+    if value > MAX_CODE_VALUE:
+        raise RuntimeError(
+            f"فضای کدهای داخلی به پایان رسیده است (آخرین کد ممکن: "
+            f"{CODE_PREFIX}{MAX_CODE_VALUE})."
+        )
 
-    max_val = 1110  # one below starting value
-    for code in existing:
-        try:
-            val = int(str(code)[3:])
-            if val > max_val:
-                max_val = val
-        except (ValueError, IndexError):
-            continue
-
-    next_val = max_val + 1
-    while "0" in str(next_val):
-        next_val += 1
-
-    # Commercial-grade safeguard: expand to 5 digits if 4-digit space is exhausted
-    if next_val > 99999:
-        raise RuntimeError("فضای کدهای داخلی به پایان رسیده است.")
-
-    next_str = f"{next_val:04d}" if next_val <= 9999 else f"{next_val:05d}"
-    return f"ZF_{next_str}"
+    return f"{CODE_PREFIX}{value:0{_MIN_WIDTH}d}"
 
 
 class PropertyAttributeValue(BaseAttributeValue):
-    """A dynamic attribute value for one property.
-
-    Only non-core attributes land here; core ones (متراژ، تعداد اتاق …) live in
-    real columns on :class:`Property` so they stay fast to filter on.
-    """
-
     property = models.ForeignKey(
         "properties.Property",
         on_delete=models.CASCADE,
@@ -262,8 +261,6 @@ class PropertyAttributeValue(BaseAttributeValue):
             )
         ]
         indexes = [
-            # One index per typed column: filtering by a dynamic attribute
-            # always narrows on attribute_id first, then the matching value.
             models.Index(fields=["attribute", "value_integer"], name="idx_pav_attr_int"),
             models.Index(fields=["attribute", "value_decimal"], name="idx_pav_attr_dec"),
             models.Index(fields=["attribute", "value_boolean"], name="idx_pav_attr_bool"),
@@ -282,6 +279,7 @@ class PropertyImage(models.Model):
         upload_to="properties/images/",
         verbose_name="تصویر",
         validators=[validate_property_image],
+        db_index=True,
     )
     sort_order = models.PositiveIntegerField(default=0, verbose_name="ترتیب نمایش")
 
@@ -295,13 +293,6 @@ class PropertyImage(models.Model):
 
 
 def appraisal_report_upload_path(instance, filename):
-    """Storage path for an appraisal PDF.
-
-    The stored name is random and URL-safe (Persian/space-laden original
-    names cause needless trouble on filesystems and in URLs); the
-    user-facing name is preserved in ``original_filename`` and used for the
-    download's Content-Disposition instead.
-    """
     ext = os.path.splitext(filename)[1].lower()
     if ext != ".pdf":
         ext = ".pdf"
@@ -309,14 +300,6 @@ def appraisal_report_upload_path(instance, filename):
 
 
 class PropertyAppraisalReport(models.Model):
-    """The single PDF appraisal report (گزارش کارشناسی) attached to a property.
-
-    One report per property — the OneToOneField enforces that at the
-    database level. Uploading again replaces the previous row and its file
-    (see ``PropertyViewSet.appraisal_report``), so exactly one PDF exists at
-    any time and no orphaned files are left behind.
-    """
-
     property = models.OneToOneField(
         "properties.Property",
         on_delete=models.CASCADE,
@@ -329,8 +312,6 @@ class PropertyAppraisalReport(models.Model):
         verbose_name="فایل گزارش کارشناسی",
         help_text="فقط فایل PDF، حداکثر ۱۰ مگابایت.",
     )
-    # Kept apart from the stored path so downloads keep the name the
-    # consultant chose, while storage stays URL-safe.
     original_filename = models.CharField(max_length=255, verbose_name="نام اصلی فایل")
     file_size = models.PositiveIntegerField(verbose_name="حجم فایل (بایت)")
     uploaded_by = models.ForeignKey(
@@ -352,10 +333,6 @@ class PropertyAppraisalReport(models.Model):
         return f"{self.property.title} - {self.original_filename}"
 
     def delete(self, *args, **kwargs):
-        # Remove the row first, then the stored PDF: if the database delete
-        # fails the file is left untouched (no dangling row), while a failed
-        # file delete can at worst leave an orphan on disk. FileSystemStorage
-        # treats a missing file as a no-op, so this never raises on re-runs.
         pk = self.pk
         super().delete(*args, **kwargs)
         if pk is not None:

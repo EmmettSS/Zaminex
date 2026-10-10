@@ -88,7 +88,6 @@ function TasksCalendar({ tasks }: { tasks: any[] }) {
     } else setViewMonth(viewMonth + 1);
   };
 
-  // Place each task on the real Jalali day of its due date (stored Gregorian).
   const tasksByDay: Record<number, any[]> = {};
   const seen = new Set<string>();
   (tasks || []).forEach((task: any) => {
@@ -120,7 +119,6 @@ function TasksCalendar({ tasks }: { tasks: any[] }) {
     if (emptyNoticeTimer.current) clearTimeout(emptyNoticeTimer.current);
   }, []);
 
-  // Build grid cells for the Jalali month.
   const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
   const cells = Array.from({ length: totalCells }, (_, idx) => {
     const day = idx - startOffset + 1;
@@ -264,12 +262,5 @@ function TasksCalendar({ tasks }: { tasks: any[] }) {
   );
 }
 
-// =============================================================================
-//  Consultants Page
-// =============================================================================
-
-// =============================================================================
-//  Consultant Analytics (detail-page reports)
-// =============================================================================
 
 export { TasksCalendar };

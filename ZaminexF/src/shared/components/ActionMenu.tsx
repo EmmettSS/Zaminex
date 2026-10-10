@@ -97,8 +97,5 @@ function ActionMenu({ actions }: { actions: { label: string; icon: React.ReactNo
   );
 }
 
-// =============================================================================
-//  Command Palette
-// =============================================================================
 
 export { ActionMenu };

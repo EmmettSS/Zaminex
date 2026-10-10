@@ -1,10 +1,3 @@
-"""Object-level access rules for ticket subjects and conversations.
-
-These functions are deliberately shared by the create serializer, subject
-lookups, list queryset and attachment download endpoint.  Keeping the rules in
-one module prevents a UI-only permission check from becoming a data leak.
-"""
-
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
@@ -44,14 +37,10 @@ def is_active_recipient(user) -> bool:
 
 
 def active_recipient_queryset(current_user=None):
-    """All valid human recipients, excluding the current account."""
-
     qs = User.objects.filter(is_active=True, role__in=["ADMIN", "AGENT"])
     if current_user and getattr(current_user, "is_authenticated", False):
         qs = qs.exclude(pk=current_user.pk)
-    # Keep inactive profiles out of the picker as well as out of validation.
-    # The NULL branches preserve compatibility with older data that has a
-    # user row but no profile yet (for example a freshly-created admin).
+        
     qs = qs.filter(
         (
             Q(role="AGENT")
@@ -83,8 +72,6 @@ def can_view_ticket(user, ticket: Ticket) -> bool:
 
 
 def visible_ticket_queryset(user):
-    """Base queryset for a user, with all list/detail relations prefetched."""
-
     if not user or not getattr(user, "is_authenticated", False):
         return Ticket.objects.none()
 
@@ -126,8 +113,6 @@ def visible_ticket_queryset(user):
 
 
 def subject_queryset_for_user(user, subject_type: str):
-    """Return only records the user may use as a ticket subject."""
-
     if subject_type == TicketSubject.PROPERTY:
         qs = Property.objects.select_related("consultant", "district")
         if not user_is_admin(user):
@@ -159,8 +144,6 @@ def subject_queryset_for_user(user, subject_type: str):
 
 
 def get_subject_for_user(user, subject_type: str, subject_id):
-    """Resolve and authorize a concrete subject, or return ``None``."""
-
     if subject_type not in SUBJECT_FIELD_NAMES:
         return None
     try:
@@ -176,8 +159,6 @@ def get_subject_for_user(user, subject_type: str, subject_id):
 
 
 def subject_is_accessible(user, subject_type: str, subject) -> bool:
-    """Check an already-loaded object without trusting its serialized id."""
-
     if subject is None:
         return False
     if user_is_admin(user):
@@ -197,8 +178,6 @@ def subject_is_accessible(user, subject_type: str, subject) -> bool:
 
 
 def participant_for_user(ticket: Ticket, user):
-    """Use the prefetch cache when present; otherwise perform one safe query."""
-
     cached = getattr(ticket, "_ticket_participants", None)
     if cached is not None:
         for participant in cached:
@@ -213,8 +192,6 @@ def participant_for_user(ticket: Ticket, user):
 
 
 def message_is_visible_to_user(message, user, ticket: Ticket) -> bool:
-    """Private reply visibility rule used by the detail endpoint."""
-
     if user_is_admin(user):
         return True
     if ticket.created_by_id == user.pk:

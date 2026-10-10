@@ -29,6 +29,7 @@ function GalleryTab({
   onDeleteImage,
   onUploadImages,
   onReorderImages,
+  readOnly = false,
 }: {
   propertyId: string;
   gallery: any[];
@@ -36,6 +37,7 @@ function GalleryTab({
   onDeleteImage?: (propertyId: string, imageId: string) => Promise<void>;
   onUploadImages?: (propertyId: string, files: File[]) => Promise<any>;
   onReorderImages?: (propertyId: string, order: { id: string | number; sort_order: number }[]) => Promise<void>;
+  readOnly?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -129,7 +131,9 @@ function GalleryTab({
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm font-semibold">{gallery.length.toLocaleString("fa-IR")} تصویر</p>
         {gallery.length > 0 && (
-          <p className="text-xs text-muted-foreground">برای حذف، روی تصویر هاور کنید · برای تغییر ترتیب بکشید</p>
+          <p className="text-xs text-muted-foreground">
+            {readOnly ? "نمایش‌فقط — شما امکان ویرایش تصاویر این ملک را ندارید" : "برای حذف، روی تصویر هاور کنید · برای تغییر ترتیب بکشید"}
+          </p>
         )}
       </div>
       {gallery.length === 0 && (
@@ -158,7 +162,7 @@ function GalleryTab({
           return (
             <div
               key={imgKey}
-              draggable
+              draggable={!readOnly}
               onDragStart={(e) => handleDragStart(e, i)}
               onDragOver={(e) => handleDragOver(e, i)}
               onDragLeave={handleDragLeave}
@@ -176,6 +180,7 @@ function GalleryTab({
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 pointer-events-none"
               />
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+              {!readOnly && (
               <button
                 onClick={(e) => { e.stopPropagation(); setConfirmDeleteImg(img); }}
                 disabled={isDeleting}
@@ -183,13 +188,17 @@ function GalleryTab({
               >
                 {isDeleting ? <Loader2 size={11} className="text-red-600 animate-spin" /> : <X size={11} className="text-red-600" />}
               </button>
+              )}
+              {!readOnly && (
               <div className="absolute top-2 left-2 w-6 h-6 bg-white/90 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing">
                 <GripVertical size={11} className="text-muted-foreground" />
               </div>
+              )}
               <div className="absolute bottom-1.5 left-1.5 bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded font-mono">{i + 1}</div>
             </div>
           );
         })}
+        {!readOnly && (
         <div
           onClick={() => fileInputRef.current?.click()}
           className={cx(
@@ -203,6 +212,7 @@ function GalleryTab({
             <><Upload size={20} className="text-muted-foreground mb-2" /><span className="text-xs text-muted-foreground">آپلود</span></>
           )}
         </div>
+        )}
       </div>
       <ConfirmModal
         open={!!confirmDeleteImg}

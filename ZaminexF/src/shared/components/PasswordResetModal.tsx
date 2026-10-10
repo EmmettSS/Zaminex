@@ -29,10 +29,6 @@ function PasswordResetModal({ open, onClose, csrfToken }: { open: boolean; onClo
     setLoading(true);
     setError("");
     try {
-      // Deliberately a plain fetch, not apiFetch: this modal opens from the
-      // login screen where there is no session to expire, so the shared
-      // "session ended → go to login" handling would be wrong here. Only the
-      // error *formatting* is shared.
       const res = await fetch("/common/api/password-reset-request/", {
         method: "POST",
         headers: {
@@ -128,8 +124,5 @@ function PasswordResetModal({ open, onClose, csrfToken }: { open: boolean; onClo
   );
 }
 
-// =============================================================================
-//  Admin Password Change Modal
-// =============================================================================
 
 export { PasswordResetModal };

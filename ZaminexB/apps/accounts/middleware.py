@@ -6,13 +6,6 @@ from .models import UserRole
 
 
 class ArchivedConsultantSessionMiddleware:
-    """Invalidate active sessions of archived consultants immediately.
-
-    If an admin archives a consultant while the consultant is still logged
-    in, the consultant is logged out on their very next request and sent to
-    the login page with a notice that their account has been deactivated.
-    """
-
     def __init__(self, get_response):
         self.get_response = get_response
 

@@ -2,12 +2,6 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "./apiClient";
 import type { AttributeSchema } from "../components/ui/DynamicAttributeFields";
 
-/**
- * Loads the reference-data catalogue (usages, property types, deal types).
- *
- * These used to be hard-coded arrays in the frontend; they are now maintained
- * by an administrator, so the forms read them at runtime.
- */
 export type CatalogItem = {
   id: number;
   name: string;
@@ -35,8 +29,6 @@ export function useBasicsCatalog(csrfToken?: string) {
         const data = await res.json();
         if (!cancelled) setCatalog(data);
       } catch {
-        // Non-fatal: the wizard falls back to an empty option list and the
-        // required-field validation still prevents an incomplete submission.
         if (!cancelled) setCatalog(null);
       } finally {
         if (!cancelled) setLoading(false);
@@ -50,13 +42,6 @@ export function useBasicsCatalog(csrfToken?: string) {
   return { catalog, loading };
 }
 
-/**
- * Loads the custom fields configured for one property type or deal type.
- *
- * Passing a falsy id clears the schema, so switching back to "no type
- * selected" removes the dynamic section instead of leaving stale fields on
- * screen.
- */
 export function useAttributeSchema(
   kind: "property" | "listing",
   typeId: string | number | null | undefined,

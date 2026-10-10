@@ -6,8 +6,8 @@ import datetime
 
 
 class UserRole(models.TextChoices):
-    ADMIN = "ADMIN", "Admin"
-    AGENT = "AGENT", "Agent"
+    ADMIN = "ADMIN", "مدیر"
+    AGENT = "AGENT", "مشاور"
 
 
 class User(AbstractUser):
@@ -33,8 +33,6 @@ class User(AbstractUser):
 
 
 class LoginAttempt(models.Model):
-    """Account-scoped failed login counter and temporary lock state."""
-
     username = models.CharField(max_length=255, unique=True, db_index=True, verbose_name="نام کاربری")
     failed_attempts = models.PositiveSmallIntegerField(default=0, verbose_name="تلاش‌های ناموفق")
     locked_until = models.DateTimeField(null=True, blank=True, db_index=True, verbose_name="قفل تا تاریخ")
@@ -67,7 +65,8 @@ class ConsultantProfile(models.Model):
     full_name = models.CharField(max_length=255, verbose_name="نام و نام خانوادگی")
     mobile = models.CharField(max_length=11, validators=[mobile_validator], unique=True, null=True, blank=True, verbose_name="شماره موبایل")
     branch = models.CharField(max_length=255, verbose_name="شعبه")
-    profile_image = models.ImageField(upload_to="consultants/profile/", blank=True, null=True, verbose_name="تصویر پروفایل")
+    profile_image = models.ImageField(upload_to="consultants/profile/", blank=True, null=True, verbose_name="تصویر پروفایل", # apps.common.media looks this column up on every avatar request.
+        db_index=True)
     hired_at = models.DateField(default=datetime.date.today, verbose_name="تاریخ استخدام")
     notes = models.TextField(blank=True, verbose_name="یادداشت‌ها")
     is_active = models.BooleanField(default=True, verbose_name="فعال")
@@ -87,14 +86,6 @@ class LoginMethod(models.TextChoices):
 
 
 class LoginSettings(models.Model):
-    """Singleton: which login method the whole system uses right now.
-
-    Edited by the admin from «پروفایل من → گزینه‌های ورود» (and also exposed in
-    Django admin as a fallback surface). When ``method`` is ``sms`` the
-    password form is rejected and vice versa, so the switch is always
-    authoritative for the entire CRM.
-    """
-
     method = models.CharField(
         max_length=20,
         choices=LoginMethod.choices,
@@ -119,18 +110,7 @@ class LoginSettings(models.Model):
 
 
 class SmsProviderSettings(models.Model):
-    """Singleton SMS gateway configuration.
-
-    Credentials are entered exclusively through Django admin (never committed
-    to the code base) and stored encrypted at rest, exactly like the AI API
-    key on ``CompanySettings``. sms.ir is the primary provider and kavenegar
-    is the automatic fallback.
-    """
-
-    # --- sms.ir (primary) -------------------------------------------------
-    smsir_api_key = models.CharField(
-        max_length=1024, blank=True, verbose_name="کلید API اسمس‌دات‌آی‌آر"
-    )
+    smsir_api_key = models.CharField(max_length=1024, blank=True, verbose_name="کلید API اسمس‌دات‌آی‌آر")
     smsir_line_number = models.CharField(
         max_length=32,
         blank=True,
@@ -143,11 +123,7 @@ class SmsProviderSettings(models.Model):
         verbose_name="شناسه قالب (templateId)",
         help_text="قالب تأیید (verify) در پنل اسمس‌دات‌آی‌آر.",
     )
-
-    # --- kavenegar (backup) ----------------------------------------------
-    kavenegar_api_key = models.CharField(
-        max_length=1024, blank=True, verbose_name="کلید API کاوه‌نگار"
-    )
+    kavenegar_api_key = models.CharField(max_length=1024, blank=True, verbose_name="کلید API کاوه‌نگار")
     kavenegar_sender = models.CharField(
         max_length=32,
         blank=True,
@@ -189,8 +165,6 @@ class SmsProviderSettings(models.Model):
         return decrypt_secret(self.kavenegar_api_key)
 
     def save(self, *args, **kwargs):
-        # If a caller assigns a plaintext key (e.g. from Django admin),
-        # encrypt it transparently on the way to the database.
         from apps.common.crypto import encrypt_secret
 
         if self.smsir_api_key and not self.smsir_api_key.startswith("enc:v1:"):
@@ -216,13 +190,6 @@ class SmsProviderSettings(models.Model):
 
 
 class SmsLoginCode(models.Model):
-    """A single-use, expiring OTP issued for SMS login.
-
-    The code itself is stored as a salted hash (Django ``make_password``), so a
-    database leak never exposes usable codes. Rate limits and the expiry window
-    are enforced in ``apps.accounts.sms``.
-    """
-
     mobile = models.CharField(max_length=16, db_index=True, verbose_name="شماره موبایل")
     code_hash = models.CharField(max_length=255, verbose_name="کد (هش‌شده)")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاریخ ایجاد")
@@ -240,13 +207,6 @@ class SmsLoginCode(models.Model):
 
 
 class AdminProfile(models.Model):
-    """Profile for ADMIN users.
-
-    Mirrors ConsultantProfile so the admin "My Profile" screen can reuse the
-    exact same data shape/serializer as the consultant one, while keeping
-    admin accounts completely separate from the consultant list.
-    """
-
     mobile_validator = RegexValidator(
         regex=r"^09\d{9}$",
         message="شماره موبایل معتبر نیست. شماره باید با ۰۹ شروع شود و ۱۱ رقم باشد.",
@@ -261,7 +221,8 @@ class AdminProfile(models.Model):
     full_name = models.CharField(max_length=255, blank=True, verbose_name="نام و نام خانوادگی")
     mobile = models.CharField(max_length=11, validators=[mobile_validator], null=True, blank=True, verbose_name="شماره موبایل")
     branch = models.CharField(max_length=255, blank=True, default="شعبه مرکزی", verbose_name="شعبه")
-    profile_image = models.ImageField(upload_to="admins/profile/", blank=True, null=True, verbose_name="تصویر پروفایل")
+    profile_image = models.ImageField(upload_to="admins/profile/", blank=True, null=True, verbose_name="تصویر پروفایل", # apps.common.media looks this column up on every avatar request.
+        db_index=True)
     hired_at = models.DateField(default=datetime.date.today, verbose_name="تاریخ استخدام")
     notes = models.TextField(blank=True, verbose_name="یادداشت‌ها")
     is_active = models.BooleanField(default=True, verbose_name="فعال")

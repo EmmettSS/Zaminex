@@ -1,12 +1,3 @@
-"""Models for the internal Zaminex ticketing workspace.
-
-A ticket is an immutable, auditable conversation.  The ticket itself carries
-its business metadata and one or more recipients.  Messages are append-only;
-when a ticket has multiple recipients, replies can be private to the creator
-and the recipient they address.  Object-level access is enforced in
-``apps.tickets.access`` and in the API serializers, never only in the UI.
-"""
-
 from __future__ import annotations
 
 import builtins
@@ -81,13 +72,6 @@ def _extension(filename: str) -> str:
 
 
 def _has_expected_signature(extension: str, header: bytes) -> bool:
-    """Reject files whose bytes do not match their declared safe extension.
-
-    This is intentionally small and deterministic.  It is not a replacement
-    for antivirus scanning, but it prevents the most common content-type and
-    extension spoofing attacks before a file reaches protected storage.
-    """
-
     if extension == "pdf":
         return header.startswith(b"%PDF-")
     if extension in {"jpg", "jpeg"}:
@@ -100,12 +84,6 @@ def _has_expected_signature(extension: str, header: bytes) -> bool:
 
 
 def validate_ticket_file(uploaded_file):
-    """Validate one ticket attachment at the model boundary.
-
-    The validator works for both in-memory and temporary uploaded files and
-    restores the current stream position afterwards so Django can persist it.
-    """
-
     if uploaded_file is None:
         return
 
@@ -134,8 +112,6 @@ def validate_ticket_file(uploaded_file):
 
 
 def ticket_attachment_upload_to(instance, filename: str) -> str:
-    """Use an opaque storage name; the original name is stored separately."""
-
     extension = _extension(filename)
     suffix = f".{extension}" if extension else ""
     now = timezone.now()
@@ -143,8 +119,6 @@ def ticket_attachment_upload_to(instance, filename: str) -> str:
 
 
 class Ticket(models.Model):
-    """Conversation metadata and the immutable business subject."""
-
     ticket_number = models.CharField(
         max_length=32,
         unique=True,
@@ -183,9 +157,6 @@ class Ticket(models.Model):
     )
     subject_id = models.PositiveBigIntegerField(verbose_name="شناسه موضوع")
 
-    # One concrete nullable FK per supported subject gives PostgreSQL a real
-    # referential constraint instead of an unbounded GenericForeignKey.  The
-    # CHECK constraint below makes sure exactly the selected field is present.
     property = models.ForeignKey(
         "properties.Property",
         on_delete=models.PROTECT,
@@ -252,8 +223,6 @@ class Ticket(models.Model):
         verbose_name="بسته‌شده توسط",
     )
 
-    # Denormalized conversation counters keep list filters and sorting cheap.
-    # They are updated only by the ticket service inside a row lock.
     reply_count = models.PositiveIntegerField(default=0, verbose_name="تعداد پاسخ")
     last_message_at = models.DateTimeField(
         null=True, blank=True, db_index=True, verbose_name="آخرین پیام"
@@ -371,13 +340,6 @@ class Ticket(models.Model):
 
 
 class TicketParticipant(models.Model):
-    """Per-user read state and last visible activity for a ticket.
-
-    The owner is also represented here.  This makes unread replies and private
-    multi-recipient threads queryable without special cases or a client-side
-    guess about who has seen a message.
-    """
-
     ticket = models.ForeignKey(
         Ticket,
         on_delete=models.CASCADE,
@@ -441,8 +403,6 @@ class TicketParticipant(models.Model):
 
 
 class TicketMessage(models.Model):
-    """Append-only message. ``thread_recipient`` scopes private replies."""
-
     ticket = models.ForeignKey(
         Ticket, on_delete=models.CASCADE, related_name="messages", verbose_name="تیکت"
     )
@@ -452,8 +412,6 @@ class TicketMessage(models.Model):
         related_name="ticket_messages",
         verbose_name="فرستنده",
     )
-    # NULL means a common message visible to every participant.  A value means
-    # only the owner, the addressed recipient and an admin auditor may see it.
     thread_recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -535,8 +493,6 @@ class TicketAttachment(models.Model):
 
 
 class TicketAuditEvent(models.Model):
-    """Append-only audit trail for ticket operations."""
-
     ticket = models.ForeignKey(
         Ticket,
         on_delete=models.CASCADE,

@@ -47,8 +47,6 @@ function AdminPasswordChangeModal({ open, onClose, userId, userName, csrfToken, 
     setLoading(true);
     setError("");
     try {
-      // Routed through apiFetch so a stale CSRF token is refreshed and retried
-      // once, and an expired session is reported centrally.
       const res = await apiFetch(
         `/common/api/admin-password-change/${userId}/`,
         {
@@ -72,9 +70,6 @@ function AdminPasswordChangeModal({ open, onClose, userId, userName, csrfToken, 
           if (onSuccess) onSuccess();
         }, 1500);
       } else {
-        // This endpoint reports failures under `error`, while DRF's own
-        // rejections (CSRF, permission, expired session) use `detail`.
-        // apiErrorMessage reads whichever the server sent.
         setError(apiErrorMessage(data, "خطا در تغییر رمز عبور"));
       }
     } catch (err) {
@@ -171,8 +166,5 @@ function AdminPasswordChangeModal({ open, onClose, userId, userName, csrfToken, 
 }
 
 
-// =============================================================================
-//  Task Detail Modal
-// =============================================================================
 
 export { AdminPasswordChangeModal };

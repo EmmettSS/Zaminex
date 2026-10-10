@@ -20,15 +20,6 @@ import { toast } from "../../../shared/lib/utils";
 import { Building2, LayoutDashboard, FileText, CheckSquare, Users, BarChart3, Settings, Bell, Search, LogOut, Plus, ChevronLeft, ChevronDown, ChevronRight, Clock, CheckCircle2, AlertCircle, MoreHorizontal, MapPin, Eye, Edit2, Trash2, Archive, Phone, Mail, Calendar, TrendingUp, Activity, Command, Star, List, LayoutGrid, Download, Shield, User, Lock, Key, RefreshCw, Circle, Zap, Target, Award, Upload, Check, AlertTriangle, Info, XCircle, Loader2, CircleCheck, TriangleAlert, Columns, Send, BellRing, X, ChevronUp, SlidersHorizontal, ArrowUpRight, Layers, MessageSquare, Sparkles, GripVertical, MoreVertical, Building, History, Flame, Image, Filter } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis, ReferenceLine, ScatterChart, Scatter, ZAxis, RadialBarChart, RadialBar } from "recharts";
 
-// =============================================================================
-//  Regions: Province → City → District
-//
-//  A single screen for the whole geography. The three levels share one layout
-//  (add box + list card) and are switched by a tab strip, so the page keeps the
-//  structure it had when it managed a flat district list.
-//
-//  Nothing is seeded: the agency defines its own coverage area.
-// =============================================================================
 
 type LevelKey = "province" | "city" | "district";
 
@@ -70,12 +61,8 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
   const [newParent, setNewParent] = useState("");
   const [adding, setAdding] = useState(false);
 
-  // A city needs a province, a district needs a city. Both parent lists are
-  // kept loaded so the "add" box can offer them whatever tab is open.
   const fetchParents = useCallback(async () => {
     try {
-      // `cache: "no-store"` keeps these authenticated GETs fresh: a province or
-      // city added a moment ago must appear immediately, never a cached copy.
       const [pRes, cRes] = await Promise.all([
         apiFetch("/basics/api/provinces/?all=1", { method: "GET", cache: "no-store" }, csrfToken),
         apiFetch("/basics/api/cities/?all=1", { method: "GET", cache: "no-store" }, csrfToken),
@@ -83,8 +70,7 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
       if (pRes.ok) setProvinces(await pRes.json());
       if (cRes.ok) setCities(await cRes.json());
     } catch {
-      // Non-fatal: the parent dropdown renders empty and the add button stays
-      // disabled, which is the correct outcome when the list cannot be loaded.
+      // Non-fatal
     }
   }, [csrfToken]);
 
@@ -103,8 +89,6 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
   useEffect(() => { fetchRows(); }, [fetchRows]);
   useEffect(() => { fetchParents(); }, [fetchParents]);
 
-  // Switching tabs resets the add box so a half-typed entry cannot be
-  // submitted against the wrong level.
   useEffect(() => { setNewName(""); setNewParent(""); setSearch(""); }, [level]);
 
   const parentOptions = useMemo(() => {
@@ -130,9 +114,6 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
 
   const handleAdd = async () => {
     if (!canAdd) return;
-    // A city/district cannot exist without its parent. `canAdd` already guards
-    // this, but resolve the id here so a request can never go out without the
-    // parent field (which the API rejects with a generic "این مقدار لازم است").
     const parentId = Number(newParent);
     if (needsParent && (!Number.isFinite(parentId) || parentId <= 0)) {
       toast({
@@ -149,17 +130,11 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
       if (level === "district") body.city = parentId;
 
       const res = await apiFetch(ENDPOINT[level], { method: "POST", body: JSON.stringify(body) }, csrfToken);
-      // `readJson` tolerates an empty body and a non-JSON error page (a CSRF
-      // rejection is served as HTML), so a failed parse can no longer be
-      // mistaken for a failed request.
       const data = await readJson(res).catch(() => null);
 
       if (res.ok) {
         toast({ type: "success", message: `${LABELS[level].one} با موفقیت اضافه شد.` });
         setNewName("");
-        // Reflect the new row immediately (and keep the parent dropdowns in
-        // sync) instead of waiting for the follow-up refetch to round-trip.
-        // The refetch below then replaces this with the authoritative list.
         if (data && data.id) {
           setRows((prev) => [data, ...prev]);
           if (level === "province") setProvinces((prev) => [data, ...prev]);
@@ -167,12 +142,6 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
         }
         await refreshAll();
       } else {
-        // A city/district failure is usually reported against its parent key
-        // (`province` / `city`), which the previous displayName-only lookup
-        // dropped — leaving the operator with a generic "خطا در اضافه کردن
-        // شهر" and no way to tell a missing parent from a duplicate name.
-        // `apiErrorMessage` walks the whole payload, so every field error
-        // reaches the toast whatever key the server used.
         toast({
           type: "error",
           message: apiErrorMessage(data, `خطا در اضافه کردن ${LABELS[level].one}`),
@@ -193,9 +162,6 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
         toast({ type: "success", message: `${LABELS[level].one} با موفقیت حذف شد.` });
         await refreshAll();
       } else {
-        // The server explains *why* a delete is refused ("این استان دارای شهر
-        // فعال است…", "۳ ملک در این محله ثبت شده است…"); surface that instead
-        // of a generic message the operator cannot act on.
         const data = await readJson(res).catch(() => null);
         toast({
           type: "error",
@@ -218,8 +184,6 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
         toast({ type: "success", message: row.isActive ? `${LABELS[level].one} غیرفعال شد.` : `${LABELS[level].one} فعال شد.` });
         await refreshAll();
       } else {
-        // Without this branch a rejected toggle looked like a no-op: the row
-        // silently snapped back on the next refresh with nothing explaining why.
         const data = await readJson(res).catch(() => null);
         toast({
           type: "error",
@@ -238,7 +202,6 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
     return fuzzyFilter(rows, search, (r) => `${r.displayName} ${r.provinceName ?? ""} ${r.cityName ?? ""}`);
   }, [rows, search]);
 
-  /** Secondary line under each row: its parent, and what depends on it. */
   const subtitleFor = (row: Row) => {
     if (level === "province") {
       return `${(row.cityCount ?? 0).toLocaleString("fa-IR")} شهر`;
@@ -254,7 +217,6 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
     <div className="p-6 max-w-4xl mx-auto space-y-5">
       <PageHeader title="مدیریت مناطق" subtitle="تعریف استان، شهر و محله‌های قابل استفاده در املاک" />
 
-      {/* Level tabs */}
       <div className="flex items-center gap-1 p-1 bg-secondary rounded-xl w-fit">
         {(Object.keys(LABELS) as LevelKey[]).map((key) => (
           <button
@@ -271,7 +233,6 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
         ))}
       </div>
 
-      {/* Add new */}
       <Card className="p-5">
         <h3 className="text-sm font-semibold mb-3">{LABELS[level].add}</h3>
         <div className="flex gap-3 items-end">
@@ -306,7 +267,6 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
         )}
       </Card>
 
-      {/* List */}
       <Card className="overflow-hidden">
         <div className="px-5 py-3.5 border-b border-border bg-secondary/30">
           <div className="flex items-center justify-between gap-3">
@@ -376,8 +336,5 @@ function DistrictsPage({ csrfToken, onDistrictsChanged }: { csrfToken: string; o
   );
 }
 
-// =============================================================================
-//  Activity Log
-// =============================================================================
 
 export { DistrictsPage };

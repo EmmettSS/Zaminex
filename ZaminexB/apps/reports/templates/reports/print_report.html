@@ -1,0 +1,354 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {# The tab title doubles as the default «Save as PDF» file name. #}
+    <title>گزارش کامل ملک — {{ property.title }}</title>
+    <style id="print-page-style">
+        @font-face {
+            font-family: IRANRounded;
+            font-style: normal;
+            font-weight: 400 900;
+            src: url("{% static 'fonts/eot/IRAN-Rounded.eot' %}") format('embedded-opentype'),
+                 url("{% static 'fonts/woff/IRAN-Rounded.woff' %}") format('woff'),
+                 url("{% static 'fonts/ttf/IRAN-Rounded.ttf' %}") format('truetype');
+        }
+
+        :root {
+            --ink: #0F172A;
+            --muted: #475569;
+            --faint: #64748B;
+            --grid: #E2E8F0;
+            --head: #F1F5F9;
+            --accent: #0BB68A;
+            --paper: #FFFFFF;
+            --bg: #EEF2F6;
+            --empty: #94A3B8;
+        }
+
+        * { box-sizing: border-box; }
+        html {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+        body {
+            margin: 0;
+            font-family: IRANRounded, Tahoma, sans-serif;
+            color: var(--ink);
+            background: var(--bg);
+            font-size: 13px;
+            line-height: 1.9;
+        }
+
+        .toolbar {
+            max-width: 940px;
+            margin: 0 auto;
+            padding: 14px 20px 10px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+        }
+        .toolbar-note {
+            flex: 1 1 320px;
+            font-size: 12px;
+            color: var(--muted);
+            background: #E8F7F2;
+            border: 1px solid #BFE9DD;
+            border-radius: 10px;
+            padding: 8px 12px;
+        }
+        .toolbar button {
+            font-family: inherit;
+            font-size: 12.5px;
+            border-radius: 10px;
+            padding: 8px 16px;
+            cursor: pointer;
+            border: 1px solid var(--accent);
+            background: var(--accent);
+            color: #fff;
+        }
+        .toolbar button.ghost {
+            background: #fff;
+            color: var(--muted);
+            border-color: var(--grid);
+        }
+        .paper {
+            max-width: 900px;
+            margin: 0 auto 40px;
+            background: var(--paper);
+            padding: 44px 52px;
+            box-shadow: 0 1px 10px rgba(15, 23, 42, 0.12);
+        }
+
+        .doc-company { color: var(--faint); font-size: 12px; }
+        .doc-title { font-size: 22px; font-weight: 900; margin: 2px 0 0; }
+        .doc-subtitle { font-size: 14.5px; color: var(--muted); margin: 2px 0 0; }
+        .doc-meta { font-size: 11.5px; color: var(--faint); margin: 2px 0 8px; }
+        .doc-rule { height: 3px; background: var(--ink); border: 0; margin: 0; }
+
+        .section { margin-top: 22px; }
+        .section-title {
+            font-size: 15px;
+            font-weight: 900;
+            margin: 0 0 8px;
+            padding-bottom: 5px;
+            border-bottom: 2px solid var(--accent);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        th, td {
+            border: 1px solid var(--grid);
+            padding: 5px 10px;
+            text-align: right;
+            vertical-align: middle;
+            word-wrap: break-word;
+        }
+        thead th {
+            background: var(--head);
+            font-weight: 700;
+        }
+        tbody tr:nth-child(even) { background: #FAFAFA; }
+
+        table.kv th {
+            width: 34%;
+            background: var(--head);
+            font-weight: 700;
+        }
+
+        .empty { color: var(--empty); font-size: 12px; margin: 6px 0; }
+
+        .chart { margin-top: 16px; }
+        .chart-title { font-size: 12px; color: var(--faint); margin-bottom: 6px; }
+        .bar-row { display: flex; align-items: center; gap: 10px; margin: 5px 0; }
+        .bar-label { width: 32%; font-size: 11.5px; text-align: right; }
+        .bar-track {
+            flex: 1;
+            background: var(--head);
+            border-radius: 6px;
+            height: 16px;
+            overflow: hidden;
+        }
+        .bar-fill { height: 100%; border-radius: 6px; }
+        .bar-value { width: 64px; font-size: 11.5px; text-align: left; color: var(--muted); }
+
+        @page {
+            size: A4;
+            margin: 14mm 12mm 18mm 12mm;
+
+            @top-left-corner { content: ""; }
+            @top-left {
+                content: "{{ generated_at }}";
+                font-family: IRANRounded, Tahoma, sans-serif;
+                font-size: 8.5pt;
+                color: #64748B;
+                direction: ltr;
+                vertical-align: middle;
+            }
+            @top-center { content: ""; }
+            @top-right { content: ""; }
+            @top-right-corner { content: ""; }
+
+            @bottom-left-corner { content: ""; }
+            @bottom-left {
+                content: "ساخته شده توسط CRM زمینکس";
+                font-family: IRANRounded, Tahoma, sans-serif;
+                font-size: 8.5pt;
+                color: #94A3B8;
+                direction: rtl;
+                vertical-align: middle;
+            }
+            @bottom-center { content: ""; }
+            @bottom-right {
+                content: counter(page) " / " counter(pages);
+                font-family: IRANRounded, Tahoma, sans-serif;
+                font-size: 8.5pt;
+                color: #94A3B8;
+                direction: ltr;
+                vertical-align: middle;
+            }
+            @bottom-right-corner { content: ""; }
+        }
+
+        @media print {
+            body { background: #fff; font-size: 11px; }
+            .toolbar { display: none; }
+            .paper {
+                max-width: none;
+                margin: 0;
+                padding: 0;
+                box-shadow: none;
+            }
+            .section { margin-top: 16px; }
+            .section-title { break-after: avoid-page; }
+            .chart { break-inside: avoid; }
+            tr { break-inside: avoid; }
+            thead { display: table-header-group; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="toolbar">
+    <div class="toolbar-note">
+        این صفحه برای چاپ یا ذخیره‌ی PDF آماده است و پنجره‌ی چاپ مرورگر به‌صورت
+        خودکار باز می‌شود. مقصد را «ذخیره به PDF» یا پرینتر مورد نظر خود انتخاب کنید.
+    </div>
+    <button id="reprint-btn" type="button">چاپ / ذخیره PDF</button>
+    <button id="close-btn" type="button" class="ghost">بستن</button>
+</div>
+
+<main class="paper">
+    <header>
+        <div class="doc-company">{{ company_name }}</div>
+        <h1 class="doc-title">گزارش کامل ملک</h1>
+        <div class="doc-subtitle">{{ header_title }}</div>
+        <div class="doc-meta">تاریخ تهیه: <span id="doc-meta-generated-at">{{ generated_at }}</span>&nbsp;&nbsp;|&nbsp;&nbsp;تهیه‌کننده: {{ exporter }}</div>
+        <hr class="doc-rule">
+    </header>
+
+    <section class="section">
+        <h2 class="section-title">۱. اطلاعات ملک</h2>
+        <table class="kv">
+            <tbody>
+            {% for label, value in property_info %}
+                <tr><th>{{ label }}</th><td>{{ value }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">۲. شاخص‌های کلیدی</h2>
+        <table class="kv">
+            <tbody>
+            {% for label, value in kpis %}
+                <tr><th>{{ label }}</th><td>{{ value }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">۳. آگهی‌های ملک</h2>
+        {% if listings %}
+            <table>
+                <thead>
+                    <tr><th>تاریخ</th><th>وضعیت</th><th>قیمت (تومان)</th><th>کانال</th><th>عنوان</th></tr>
+                </thead>
+                <tbody>
+                {% for row in listings %}
+                    <tr>
+                        <td>{{ row.date }}</td>
+                        <td>{{ row.status }}</td>
+                        <td>{{ row.price }}</td>
+                        <td>{{ row.channel }}</td>
+                        <td>{{ row.title }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="empty">برای این ملک آگهی‌ای ثبت نشده است.</p>
+        {% endif %}
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">۴. وظایف ملک</h2>
+        {% if tasks %}
+            <table>
+                <thead>
+                    <tr><th>تاریخ سررسید</th><th>وضعیت</th><th>عنوان</th></tr>
+                </thead>
+                <tbody>
+                {% for row in tasks %}
+                    <tr>
+                        <td>{{ row.date }}</td>
+                        <td>{{ row.status }}</td>
+                        <td>{{ row.title }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="empty">برای این ملک وظیفه‌ای ثبت نشده است.</p>
+        {% endif %}
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">۵. پیگیری‌های ملک</h2>
+        {% if followups %}
+            <table>
+                <thead>
+                    <tr><th>تاریخ زمان‌بندی</th><th>وضعیت</th><th>عنوان</th></tr>
+                </thead>
+                <tbody>
+                {% for row in followups %}
+                    <tr>
+                        <td>{{ row.date }}</td>
+                        <td>{{ row.status }}</td>
+                        <td>{{ row.title }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="empty">برای این ملک پیگیری‌ای ثبت نشده است.</p>
+        {% endif %}
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">۶. نمودارها</h2>
+        {% for block in charts %}
+            <div class="chart">
+                <div class="chart-title">{{ block.title }}</div>
+                {% if block.hasData %}
+                    {% for bar in block.bars %}
+                        <div class="bar-row">
+                            <div class="bar-label">{{ bar.label }}</div>
+                            <div class="bar-track">
+                                <div class="bar-fill" style="width: {{ bar.pct }}%; background: {{ bar.color }};"></div>
+                            </div>
+                            <div class="bar-value">{{ bar.value }}</div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="empty">داده‌ای برای نمایش وجود ندارد.</p>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </section>
+
+    <section class="section">
+        <h2 class="section-title">۷. سابقه و لاگ‌های ملک</h2>
+        {% if logs %}
+            <table>
+                <thead>
+                    <tr><th>شرح</th><th>عملیات</th><th>کاربر</th><th>تاریخ و ساعت</th></tr>
+                </thead>
+                <tbody>
+                {% for row in logs %}
+                    <tr>
+                        <td>{{ row.description }}</td>
+                        <td>{{ row.action }}</td>
+                        <td>{{ row.user }}</td>
+                        <td>{{ row.when }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="empty">لاگ ثبت‌شده‌ای برای این ملک یافت نشد.</p>
+        {% endif %}
+    </section>
+</main>
+
+<script src="{% static 'reports/print_report.js' %}"></script>
+</body>
+</html>

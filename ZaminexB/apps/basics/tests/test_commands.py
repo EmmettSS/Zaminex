@@ -1,5 +1,3 @@
-"""Tests for the `seed_basics` and `link_properties_to_basics` commands."""
-
 import io
 
 from django.contrib.auth import get_user_model

@@ -1,14 +1,8 @@
-"""Task change-history helpers.
-
-ActivityLog already records task events. These helpers:
-  - produce precise Persian titles and field-level metadata when logging
-  - serialize those logs for the task history API
-"""
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
 
-from apps.common.models import ActivityLog
+from apps.activity.models import ActivityLog
 
 
 STATUS_FA = {
@@ -123,8 +117,7 @@ def _format_value(field: str, value) -> str:
         text = str(value).strip()
         if not text:
             return "—"
-        # Notes are free-form text; keep a compact preview in the activity log
-        # so the actual content is not dumped in full into every feed row.
+
         return text if len(text) <= 80 else text[:77] + "…"
     return str(value)
 
@@ -162,7 +155,6 @@ def diff_task(old: dict, new: dict) -> list[dict]:
 
 
 def classify_task_event(changes: list[dict]) -> tuple[str, str]:
-    """Return (action, event_title) for a set of field changes."""
     fields = {c["field"] for c in changes}
     if fields == {"status"}:
         new_status = next(c["to"] for c in changes if c["field"] == "status")

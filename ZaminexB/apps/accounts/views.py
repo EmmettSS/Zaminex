@@ -1,6 +1,7 @@
 from django.contrib.auth import login, update_session_auth_hash
 from django.contrib.auth.views import LoginView
 from django.db import transaction
+from django.http import HttpResponseRedirect
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -33,11 +34,6 @@ from .throttles import SmsRequestRateThrottle, SmsVerifyRateThrottle
 
 
 def _safe_next_url(request) -> str:
-    """Validate the ``next`` parameter the same way Django's LoginView does.
-
-    The SPA redirects the browser to the returned value after a successful SMS
-    login, so an unvalidated ``next`` would be an open-redirect vector.
-    """
     next_url = (request.data.get("next") or "").strip()
     if next_url and url_has_allowed_host_and_scheme(
         url=next_url,
@@ -51,8 +47,18 @@ def _safe_next_url(request) -> str:
 @method_decorator(ensure_csrf_cookie, name="dispatch")
 class CustomLoginView(LoginView):
     template_name = "accounts/login.html"
-    redirect_authenticated_user = True
     form_class = ZaminexAuthenticationForm
+
+    def get(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            redirect_to = self.get_success_url()
+            if redirect_to == request.path:
+                raise ValueError(
+                    "Redirection loop for authenticated user detected. Check that "
+                    "your LOGIN_REDIRECT_URL doesn't point to a login page."
+                )
+            return HttpResponseRedirect(redirect_to)
+        return super().get(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -67,8 +73,6 @@ class CustomLoginView(LoginView):
             "logoutUrl": "/accounts/logout/",
             "csrfToken": get_token(self.request),
             "next": self.request.GET.get("next", "/"),
-            # Which form the login screen shows is decided server-side by the
-            # admin's global «گزینه‌های ورود» switch.
             "loginMethod": active_login_method(),
         }
 
@@ -79,8 +83,6 @@ class CustomLoginView(LoginView):
             for field, error_list in form.errors.items():
                 login_errors[field] = [str(e) for e in error_list]
 
-        # A consultant who was archived mid-session is bounced here by
-        # ArchivedConsultantSessionMiddleware with ?deactivated=1.
         if self.request.GET.get("deactivated"):
             login_errors.setdefault("__all__", []).append(INACTIVE_ACCOUNT_MESSAGE)
 
@@ -89,8 +91,6 @@ class CustomLoginView(LoginView):
 
 
 class IsAdminRole(BasePermission):
-    """DRF permission: only users with the ADMIN role."""
-
     message = "فقط مدیران به این بخش دسترسی دارند."
 
     def has_permission(self, request, view):
@@ -102,12 +102,6 @@ class IsAdminRole(BasePermission):
 
 
 class LoginOptionsView(APIView):
-    """Admin-only: read/change the active login method (password vs SMS).
-
-    The value is a global singleton, so whatever the admin picks here becomes
-    the system's login behaviour immediately (including for the login page).
-    """
-
     permission_classes = [IsAuthenticated, IsAdminRole]
 
     def get(self, request):
@@ -123,14 +117,10 @@ class LoginOptionsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         set_login_method(method)
-        return Response(
-            {"method": method, "smsConfigured": is_sms_configured()}
-        )
+        return Response({"method": method, "smsConfigured": is_sms_configured()})
 
 
 class SmsLoginRequestView(APIView):
-    """Anonymous: request an OTP for the given mobile number."""
-
     permission_classes = [AllowAny]
     throttle_classes = [SmsRequestRateThrottle]
 
@@ -149,9 +139,6 @@ class SmsLoginRequestView(APIView):
 
         user, _reason = find_user_by_mobile(mobile)
         if user is None:
-            # Anti-enumeration: the answer is identical whether or not the
-            # number is registered, so the endpoint cannot be used to probe
-            # which mobiles have an account.
             return Response(
                 {"detail": "در صورت ثبت بودن شماره، کد تأیید برای شما پیامک می‌شود."},
                 status=status.HTTP_200_OK,
@@ -160,7 +147,9 @@ class SmsLoginRequestView(APIView):
         cooldown = resend_cooldown_remaining(mobile)
         if cooldown > 0:
             return Response(
-                {"detail": f"ارسال کد به‌تازگی انجام شده است. {cooldown} ثانیه دیگر صبر کنید."},
+                {
+                    "detail": f"ارسال کد به‌تازگی انجام شده است. {cooldown} ثانیه دیگر صبر کنید."
+                },
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
@@ -177,8 +166,6 @@ class SmsLoginRequestView(APIView):
 
 
 class SmsLoginVerifyView(APIView):
-    """Anonymous: verify an OTP and start an authenticated session."""
-
     permission_classes = [AllowAny]
     throttle_classes = [SmsVerifyRateThrottle]
 
@@ -207,8 +194,6 @@ class SmsLoginVerifyView(APIView):
         except OtpVerificationError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        # django.contrib.auth.login() already rotates the session key for a
-        # fresh anonymous session, which defeats session fixation.
         login(request, user)
         return Response(
             {"detail": "ورود با موفقیت انجام شد.", "next": _safe_next_url(request)},
@@ -217,7 +202,6 @@ class SmsLoginVerifyView(APIView):
 
 
 def change_password_for_user(request) -> Response:
-    """Shared password-change logic for the authenticated user (any role)."""
     user = request.user
     current_password = request.data.get("current_password") or request.data.get("currentPassword")
     new_password = request.data.get("new_password") or request.data.get("newPassword")
@@ -251,20 +235,6 @@ def change_password_for_user(request) -> Response:
 
 
 class ConsultantProfileViewSet(viewsets.ModelViewSet):
-    """Full CRUD for ConsultantProfile.
-
-    The queryset only ever contains real consultants (users with the AGENT
-    role) so admin accounts never show up in the admin dashboard's
-    consultant list, comboboxes or analytics.
-
-    Creating a consultant also creates the linked User account.
-    Updating a consultant can update both the profile fields and
-    the linked User fields (first_name, last_name, email).
-    Archive is done via PATCH {is_active: false}.
-    Delete removes the consultant *completely* from the backend
-    (profile + user account + owned data).
-    """
-
     serializer_class = ConsultantProfileSerializer
     permission_classes = [IsAuthenticated]
 
@@ -307,16 +277,6 @@ class ConsultantProfileViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
     def perform_destroy(self, instance):
-        """Archive the consultant instead of hard-deleting data.
-
-        A hard delete destroys the audit trail (ActivityLog rows point to the
-        user via a SET_NULL foreign key), removes every property the consultant
-        ever created and permanently deletes the login account. The UI already
-        models deactivation as *archive* (is_active=False), so we keep that
-        semantic here: the consultant is locked out by ArchivedConsultant
-        SessionMiddleware, their profile is hidden from lists, but the history
-        remains reportable.
-        """
         with transaction.atomic():
             instance = ConsultantProfile.objects.select_for_update().get(pk=instance.pk)
             instance.is_active = False
@@ -325,16 +285,11 @@ class ConsultantProfileViewSet(viewsets.ModelViewSet):
             user.is_active = False
             user.save(update_fields=["is_active"])
 
-            # Immediately terminate every remaining session for this user so a
-            # stolen cookie cannot survive the archive action.
             from apps.common.session_security import flush_user_sessions
             flush_user_sessions(user)
 
     @action(detail=False, methods=["get", "patch"], url_path="me")
     def me(self, request):
-        # Admins have their own dedicated profile endpoint (/accounts/admins/me/).
-        # Blocking them here also prevents admin accounts from accidentally
-        # creating a ConsultantProfile and appearing in the consultant list.
         if getattr(request.user, "role", "") == UserRole.ADMIN:
             return Response(
                 {"detail": "مدیران از طریق endpoint اختصاصی خود پروفایلشان را مدیریت می‌کنند."},
@@ -373,14 +328,6 @@ class ConsultantProfileViewSet(viewsets.ModelViewSet):
 
 
 class AdminProfileViewSet(viewsets.GenericViewSet):
-    """"My Profile" for the logged-in ADMIN.
-
-    Exposes exactly the same data shape as the consultant profile API
-    (GET/PATCH on ``me`` + change-password) so the admin panel can reuse the
-    consultant "My Profile" UI one-to-one, while keeping admin data in a
-    separate AdminProfile model — admins never pollute the consultant list.
-    """
-
     serializer_class = AdminProfileSerializer
     permission_classes = [IsAuthenticated, IsAdminRole]
 

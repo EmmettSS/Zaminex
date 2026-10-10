@@ -10,11 +10,6 @@ export type AIDescription = {
   summary: string;
 };
 
-/**
- * Reusable "توصیف هوش مصنوعی" card, styled like the static AI sections.
- * Renders three positives, three negatives and a summary (Digikala-style).
- * When AI is not configured it shows a graceful "خالی" state.
- */
 function AIDescription({
   title,
   fetchFn,
@@ -22,10 +17,8 @@ function AIDescription({
   reloadKey,
 }: {
   title: string;
-  /** Async function returning the AI description (or null when unavailable). */
   fetchFn: () => Promise<AIDescription | null>;
   className?: string;
-  /** Change this when the entity changes so we never show another record's text. */
   reloadKey?: string | number;
 }) {
   const [data, setData] = useState<AIDescription | null>(null);
@@ -54,7 +47,6 @@ function AIDescription({
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey]);
 
   return (
@@ -132,7 +124,6 @@ function AIDescription({
 
 export { AIDescription };
 
-/** Build an AIDescription fetch function for an entity via the AI endpoint. */
 export function makeAIDescriptionFetcher(
   entity: "consultant" | "property",
   id: string | number,
@@ -144,7 +135,6 @@ export function makeAIDescriptionFetcher(
       { method: "POST" },
       csrfToken
     );
-    // 503 means AI is not configured → treat as unavailable (null), not error.
     if (res.status === 503) return null;
     if (!res.ok) {
       const payload = await readJson(res);

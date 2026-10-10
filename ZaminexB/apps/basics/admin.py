@@ -1,13 +1,8 @@
-"""Django-admin registration for the reference data.
-
-A convenience for developers and support staff. The product-facing way to
-manage this data is the "اطلاعات پایه" screen backed by the REST API.
-"""
-
 from django.contrib import admin
 
 from .models import (
     Attribute,
+    AttributeCategory,
     City,
     District,
     Province,
@@ -23,8 +18,6 @@ from .models import (
 
 
 class SoftDeleteAdmin(admin.ModelAdmin):
-    """Shows soft-deleted rows too, so they can be inspected and restored."""
-
     def get_queryset(self, request):
         return self.model.all_objects.all()
 
@@ -100,6 +93,16 @@ class DealTypeAdmin(SoftDeleteAdmin):
     search_fields = ("name", "display_name")
     ordering = ("sort_order",)
     inlines = [DealTypeAttributeInline, DealTypeSearchAttributeInline]
+
+
+@admin.register(AttributeCategory)
+class AttributeCategoryAdmin(SoftDeleteAdmin):
+    list_display = (
+        "display_name", "name", "sort_order", "is_active", "deleted_at",
+    )
+    list_filter = ("is_active",)
+    search_fields = ("name", "display_name")
+    ordering = ("sort_order",)
 
 
 @admin.register(Attribute)

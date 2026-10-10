@@ -39,8 +39,5 @@ function TopBar({ userName, userImageUrl, role, onCmd, onNotif, notifOpen, unrea
   );
 }
 
-// =============================================================================
-//  Empty State / Page Header
-// =============================================================================
 
 export { TopBar };

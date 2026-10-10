@@ -7,7 +7,6 @@ def _generate_for_existing(apps, schema_editor):
     Property = apps.get_model("properties", "Property")
     props = list(Property.objects.all().order_by("id"))
 
-    # Find max existing sequential code
     max_val = 1110
     import re
     for prop in props:
@@ -23,7 +22,6 @@ def _generate_for_existing(apps, schema_editor):
                 except ValueError:
                     pass
 
-    # Rewrite all existing properties in order
     for prop in props:
         max_val += 1
         while "0" in str(max_val):
@@ -34,7 +32,6 @@ def _generate_for_existing(apps, schema_editor):
 
 
 def reverse_rewrite(apps, schema_editor):
-    # Reverse is a no-op; original codes are lost intentionally per spec.
     pass
 
 

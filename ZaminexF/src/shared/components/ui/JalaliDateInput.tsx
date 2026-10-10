@@ -20,14 +20,6 @@ function jalaliKey(jy: number, jm: number, jd: number) {
   return `${jy}-${String(jm).padStart(2, "0")}-${String(jd).padStart(2, "0")}`;
 }
 
-/**
- * A Shamsi (Jalali) date picker.
- *
- * Props mirror a native date input: `value` is the Gregorian "YYYY-MM-DD"
- * (what the rest of the app / the API expects), but the calendar shown and the
- * dates the user picks are real Jalali. Selecting a day emits its Gregorian
- * equivalent through `onChange`, so nothing below this component changes.
- */
 function JalaliDateInput({
   label,
   value,

@@ -1,10 +1,3 @@
-"""Transactional ticket operations.
-
-All mutations pass through this module so counters, private-thread read state,
-notifications and audit records cannot drift apart when a request fails halfway
-through.
-"""
-
 from __future__ import annotations
 
 import re
@@ -14,8 +7,8 @@ from pathlib import Path
 from django.db import transaction
 from django.utils import timezone
 
-from apps.common.activity import log_activity
-from apps.common.models import Notification
+from apps.activity.activity import log_activity
+from apps.notifications.models import Notification
 
 from .access import can_view_ticket
 from .models import (
@@ -63,8 +56,6 @@ def _user_display_name(user) -> str:
 
 def _safe_original_name(uploaded_file) -> str:
     name = Path(str(getattr(uploaded_file, "name", "پیوست"))).name
-    # Keep the original display name useful while stripping control characters
-    # and path separators. Storage itself always uses an opaque UUID name.
     name = re.sub(r"[\x00-\x1f\x7f]", "", name).strip()
     return name[:255] or "پیوست"
 
@@ -88,7 +79,6 @@ def _create_attachments(message: TicketMessage, files):
             content_type=(getattr(uploaded_file, "content_type", "") or "")[:100],
             size=int(getattr(uploaded_file, "size", 0) or 0),
         )
-        # Run model-level validators before writing the opaque storage object.
         attachment.full_clean(exclude=["message"])
         attachment.save(force_insert=True)
         attachments.append(attachment)
@@ -126,8 +116,6 @@ def _audit(ticket: Ticket, actor, action: str, metadata: dict | None = None):
         action=action,
         metadata=metadata or {},
     )
-    # The global activity feed is useful to administrators; failures there must
-    # never roll back the ticket operation (the ticket audit is authoritative).
     action_map = {
         TicketAuditAction.CREATED: "create",
         TicketAuditAction.REPLIED: "update",
@@ -208,8 +196,6 @@ def _set_initial_participant_state(
 
 @transaction.atomic
 def create_ticket(*, actor, validated_data):
-    """Create a ticket, its initial message, participants and notifications."""
-
     subject = validated_data["subject"]
     subject_type = validated_data["subject_type"]
     recipients = validated_data["recipients"]
@@ -274,8 +260,6 @@ def create_ticket(*, actor, validated_data):
 def add_message(
     *, ticket: Ticket, actor, body: str, thread_recipient_id=None, attachments=None
 ):
-    """Append a reply and update only the participants who can see it."""
-
     locked_ticket = Ticket.objects.select_for_update().get(pk=ticket.pk)
     if not can_view_ticket(actor, locked_ticket):
         raise PermissionError("به این تیکت دسترسی ندارید.")
@@ -332,9 +316,6 @@ def add_message(
     locked_ticket.reply_count += 1
     locked_ticket.last_message_at = now
     locked_ticket.last_message_sender = actor
-    # A new message is an explicit reopening operation. Once there is a reply,
-    # the global ticket is considered answered while participants retain their
-    # own needsResponse/read state.
     locked_ticket.status = TicketStatus.ANSWERED
     locked_ticket.closed_at = None
     locked_ticket.closed_by = None
@@ -380,8 +361,6 @@ def add_message(
 
 @transaction.atomic
 def update_ticket_metadata(*, ticket: Ticket, actor, changes: dict):
-    """Allow an administrator to edit metadata without touching messages."""
-
     locked_ticket = Ticket.objects.select_for_update().get(pk=ticket.pk)
     old_status = locked_ticket.status
     before = {}
@@ -442,6 +421,14 @@ def mark_read(*, ticket: Ticket, actor) -> bool:
     participant.is_read = True
     participant.read_at = now
     participant.save(update_fields=["is_read", "read_at"])
+    try:
+        from apps.common import cache_utils
+
+        cache_utils.cache_delete(
+            cache_utils.make_key("poll", "ticket-unread", actor.pk)
+        )
+    except Exception:
+        pass
     _audit(locked_ticket, actor, TicketAuditAction.READ, {})
     return True
 

@@ -13,10 +13,15 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from apps.basics.models import Attribute
 from apps.common.attribute_filters import apply_attribute_filters
 from apps.common.fuzzy_search import apply_fuzzy_search
-from apps.common.metrics import annotate_effective_prices, effective_sale_price as _sale_price
+from apps.analytics.metrics import annotate_effective_prices, effective_sale_price as _sale_price
 
 from .permissions import consultant_required
-from .models import Property, PropertyAppraisalReport, PropertyImage
+from .models import (
+    Property,
+    PropertyAppraisalReport,
+    PropertyImage,
+    _generate_next_internal_code,
+)
 
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
@@ -24,11 +29,13 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from apps.common.access import can_access_property, can_manage_property
+from apps.common.cache_invalidation import invalidate_property_caches
 from .validators import validate_appraisal_pdf, validate_property_image
 
 from .serializers import (
     PropertyAppraisalReportSerializer,
     PropertyImageSerializer,
+    PropertyListSerializer,
     PropertySerializer,
 )
 from apps.common.pagination import StandardResultsSetPagination
@@ -39,41 +46,37 @@ class PropertyViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = StandardResultsSetPagination
 
+    def get_serializer_class(self):
+        if self.action == "list":
+            return PropertyListSerializer
+        return PropertySerializer
+
     def get_queryset(self):
         user = self.request.user
         django_role = getattr(user, "role", "")
 
-        # Everything the serializer touches is loaded up front, otherwise each
-        # row costs a handful of extra queries:
-        #   listings__deal_type      → the derived `price`
-        #   property_type_ref/usage  → the reference-data labels
-        #   district chain           → `locationPath`
-        #   attribute_values         → the dynamic attributes
-        #   appraisal_report         → the attached PDF metadata
-        qs = (
-            Property.objects.select_related(
-                "consultant",
-                "property_type_ref",
-                "property_usage",
-                "district",
-                "district__city",
-                "district__city__province",
+        qs = Property.objects.select_related(
+            "consultant",
+            "property_type_ref",
+            "property_usage",
+            "district",
+            "district__city",
+            "district__city__province",
+        )
+        if self.action == "list":
+            qs = qs.prefetch_related("images", "listings__deal_type")
+        else:
+            qs = qs.select_related(
                 "appraisal_report",
                 "appraisal_report__uploaded_by",
-            )
-            .prefetch_related(
+            ).prefetch_related(
                 "images",
                 "followups",
                 "tasks",
                 "listings__deal_type",
                 "attribute_values__attribute",
             )
-        )
 
-        # Read-only access to *every* property in the system for the consultant
-        # "همه املاک" tab. Only honoured for GET requests so a consultant can
-        # browse/view details of any property but update/destroy/image actions
-        # still resolve through the restricted queryset below (owner/shared only).
         scope_all = (
             self.request.method == "GET"
             and self.request.query_params.get("scope") == "all"
@@ -82,9 +85,6 @@ class PropertyViewSet(viewsets.ModelViewSet):
             qs = qs.filter(Q(consultant=user) | Q(is_shared=True))
 
         search_query = self.request.query_params.get("q")
-        # Free-text search over title, internal code and address. The actual
-        # matching and relevance ranking is delegated to TrigramSimilarity search
-        # through the shared helper; when active, its score ordering is preserved below.
         fuzzy_search_active = bool(search_query and search_query.strip())
         if search_query:
             qs = apply_fuzzy_search(
@@ -118,12 +118,6 @@ class PropertyViewSet(viewsets.ModelViewSet):
             elif transaction_type.lower() == "rent":
                 qs = qs.filter(deal_type=Property.DealType.RENT)
 
-        # -- location filters (province -> city -> district) ------------------
-        # City filter: exact match on display name or id, for the new city combobox.
-        # The frontend city combobox submits an exact display name, so we match it
-        # with plain exact lookups instead of trigram fuzzy search. This avoids a
-        # runtime dependency on the optional pg_trgm extension (which was causing a
-        # 500 when the city/district filter was used on a database without it).
         city = self.request.query_params.get("city")
         if city:
             if str(city).isdigit():
@@ -139,8 +133,6 @@ class PropertyViewSet(viewsets.ModelViewSet):
             if str(district).isdigit():
                 qs = qs.filter(district_id=district)
             else:
-                # Legacy text filter on the free-text neighborhood plus the new
-                # hierarchical district name. ID input still stays exact.
                 qs = qs.filter(
                     Q(neighborhood__iexact=district)
                     | Q(district__display_name__iexact=district)
@@ -151,21 +143,15 @@ class PropertyViewSet(viewsets.ModelViewSet):
         if property_status:
             qs = qs.filter(status__iexact=property_status.upper())
 
-        # Price lives on the listing now, so the range filters resolve through
-        # the property's sale listings and fall back to the legacy column for
-        # records created before the split — matching what the API reports as
-        # `price`, so a filter can never contradict the number on screen.
         price_min = self.request.query_params.get("priceMin")
         price_max = self.request.query_params.get("priceMax")
         if price_min or price_max:
             qs = self._filter_by_price(qs, price_min, price_max)
 
         consultant_id = self.request.query_params.get("consultantId")
-        if consultant_id and django_role == "ADMIN":
+        if consultant_id and (django_role == "ADMIN" or scope_all):
             qs = qs.filter(consultant_id=consultant_id)
 
-        # Filters generated from the property type's search attributes, sent as
-        # `attr_<name>` / `attr_<name>_min` / `attr_<name>_max`.
         qs = apply_attribute_filters(
             qs,
             self.request.query_params,
@@ -173,7 +159,6 @@ class PropertyViewSet(viewsets.ModelViewSet):
             values_relation="attribute_values",
         )
 
-        # Restrict to one property type when the dynamic filter bar is scoped.
         property_type_ref = self.request.query_params.get("propertyTypeRef")
         if property_type_ref:
             if str(property_type_ref).isdigit():
@@ -181,22 +166,12 @@ class PropertyViewSet(viewsets.ModelViewSet):
             else:
                 qs = qs.filter(property_type_ref__name=property_type_ref)
 
-        # When a free-text search is active, `apply_fuzzy_search` has already
-        # ordered the queryset by descending relevance; keep that ordering so
-        # pagination surfaces the best matches first. Otherwise fall back to
-        # the usual newest-first ordering.
         if fuzzy_search_active:
             return qs
         return qs.order_by("-created_at")
 
     @staticmethod
     def _filter_by_price(queryset, price_min, price_max):
-        """Keep properties whose effective sale price sits in the range.
-
-        The figure is derived, not stored, so the comparison is done in Python
-        over the resolved map. The id list is small because every other filter
-        has already been applied by this point.
-        """
         prices = annotate_effective_prices(list(queryset.values_list("id", flat=True)))
 
         keep = []
@@ -237,7 +212,6 @@ class PropertyViewSet(viewsets.ModelViewSet):
             consultant = serializer.validated_data.get("consultant", serializer.instance.consultant)
             serializer.save(consultant=consultant)
         else:
-            # Consultants keep the original consultant on shared properties.
             if serializer.instance.is_shared:
                 serializer.save()
             else:
@@ -252,9 +226,70 @@ class PropertyViewSet(viewsets.ModelViewSet):
             )
         return super().destroy(request, *args, **kwargs)
 
+    @action(detail=False, methods=["get"], url_path="next-internal-code")
+    def next_internal_code(self, request):
+        return Response({"internalCode": _generate_next_internal_code()})
+
+    @action(detail=False, methods=["get"], url_path="options")
+    def options(self, request):
+        rows = list(
+            self.get_queryset()
+            .prefetch_related(None)
+            .values(
+                "id",
+                "title",
+                "internal_code",
+                "neighborhood",
+                "status",
+                "area",
+                "latitude",
+                "longitude",
+                "price",
+                "is_shared",
+                "consultant_id",
+                "consultant__first_name",
+                "consultant__last_name",
+                "consultant__username",
+            )
+        )
+        
+        prices = annotate_effective_prices([row["id"] for row in rows])
+
+        options = []
+        for row in rows:
+            price = prices.get(row["id"], row["price"])
+            full_name = " ".join(
+                part
+                for part in (
+                    row["consultant__first_name"],
+                    row["consultant__last_name"],
+                )
+                if part
+            ).strip()
+            options.append(
+                {
+                    "id": row["id"],
+                    "title": row["title"],
+                    "internalCode": row["internal_code"],
+                    "district": row["neighborhood"],
+                    "price": str(price) if price is not None else None,
+                    "propertyStatus": (row["status"] or "").lower(),
+                    "area": row["area"],
+                    "latitude": row["latitude"],
+                    "longitude": row["longitude"],
+                    "isShared": bool(row["is_shared"]),
+                    "consultantId": row["consultant_id"],
+                    "consultantName": (
+                        (full_name or row["consultant__username"] or "نامشخص")
+                        if row["consultant_id"]
+                        else "نامشخص"
+                    ),
+                }
+            )
+        return Response(options)
+
     @action(detail=True, methods=["post"], url_path="toggle-shared")
     def toggle_shared(self, request, pk=None):
-        """Toggle the is_shared flag. Admin-only."""
         if getattr(request.user, "role", "") != "ADMIN":
             return Response({"detail": "فقط مدیران می‌توانند این تنظیم را تغییر دهند."}, status=403)
         prop = self.get_object()
@@ -327,6 +362,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
                 {"detail": "فرمت ورودی نامعتبر است. لیستی از {id, sort_order} انتظار می‌رود."},
                 status=400,
             )
+        changed = 0
         for item in order_data:
             img_id = item.get("id")
             sort_order = item.get("sort_order")
@@ -335,19 +371,16 @@ class PropertyViewSet(viewsets.ModelViewSet):
             PropertyImage.objects.filter(
                 pk=img_id, property=property_obj
             ).update(sort_order=sort_order)
+            changed += 1
+
+        if changed:
+            invalidate_property_caches(property_obj)
         images = PropertyImage.objects.filter(
             property=property_obj
         ).order_by("sort_order", "id")
         return Response(
             PropertyImageSerializer(images, many=True, context={"request": request}).data
         )
-
-    # -- appraisal report (گزارش کارشناسی) --------------------------------
-    # A property carries at most one PDF appraisal report. Upload and delete
-    # share this endpoint; the file itself is streamed by the separate
-    # `download` action below. Upload/delete rights match the gallery images:
-    # the consultant the property is assigned to (کارشناس ثبت‌کننده /
-    # واگذارشده) or an admin — enforced by `can_manage_property`.
 
     @action(detail=True, methods=["post", "delete"], url_path="appraisal-report")
     def appraisal_report(self, request, pk=None):
@@ -375,10 +408,6 @@ class PropertyViewSet(viewsets.ModelViewSet):
             return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
-            # Exactly one report per property: a new upload replaces the
-            # previous row and its file. The instance-level delete() removes
-            # the stored PDF too; the transaction keeps the row consistent
-            # even if that storage cleanup were to fail.
             existing = PropertyAppraisalReport.objects.filter(
                 property=property_obj
             ).first()
@@ -411,7 +440,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
                 {"detail": "گزارش کارشناسی برای این ملک ثبت نشده است."},
                 status=404,
             )
-        # Instance delete also removes the stored PDF (see the model).
+        
         report.delete()
         return Response(status=204)
 
@@ -422,14 +451,6 @@ class PropertyViewSet(viewsets.ModelViewSet):
         url_name="appraisal-report-download",
     )
     def download_appraisal_report(self, request, pk=None):
-        """Stream the appraisal PDF.
-
-        Read access mirrors the gallery images (`can_access_property`):
-        admins, the assigned consultant, and — for shared properties — every
-        consultant. Served as an attachment under the original filename so
-        the download button saves the file; `?inline=1` switches the
-        disposition for the in-tab preview.
-        """
         property_obj = self.get_object()
         if not can_access_property(request.user, property_obj):
             return Response(
@@ -484,8 +505,7 @@ def property_list(request):
         properties_qs = Property.objects.filter(Q(consultant=user) | Q(is_shared=True))
 
     search_query = request.GET.get("q")
-    # Free-text search over title, internal code and address, delegated to the
-    # shared search helper so the server-rendered list matches the REST API.
+    
     fuzzy_search_active = bool(search_query and search_query.strip())
     if search_query:
         properties_qs = apply_fuzzy_search(
@@ -509,8 +529,7 @@ def property_list(request):
         )
 
     properties_qs = properties_qs.prefetch_related("listings__deal_type")
-    # Keep the relevance ordering from `apply_fuzzy_search` when searching so
-    # the first page shows the strongest matches; otherwise newest-first.
+    
     if fuzzy_search_active:
         paginator = Paginator(properties_qs, 12)
     else:
@@ -625,9 +644,6 @@ def get_common_initial_data(request, page_name):
 def property_create_view(request):
     data = get_common_initial_data(request, "add-property")
     
-    # Districts are deliberately not embedded here.  The React form obtains the
-    # current active list from /common/api/districts/, so changes made in the
-    # district-management page are reflected without a frontend deployment.
     return render(request, "dashboard.html", {"initial_data": data})
 
 @ensure_csrf_cookie
@@ -666,8 +682,6 @@ def property_detail(request, pk):
             pk=pk
         )
     else:
-        # Read access to every property (the "همه املاک" tab). Mutating actions
-        # (archive, image management) still go through their own owner-only views.
         property_obj = get_object_or_404(
             Property.objects.prefetch_related("images"),
             pk=pk,

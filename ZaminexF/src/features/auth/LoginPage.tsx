@@ -21,8 +21,6 @@ function LoginPage({
     initialData: any; 
     navigate: () => void 
   }) {
-    // Which form the server renders is decided by the admin's global
-    // «گزینه‌های ورود» switch, delivered here through initialData.loginMethod.
     const loginMethod = initialData.loginMethod === "sms" ? "sms" : "password";
 
     const [email, setEmail] = useState(""); 
@@ -32,7 +30,6 @@ function LoginPage({
 
     const [errors, setErrors] = useState<Record<string, string[]>>({});
 
-    // ── SMS OTP state ───────────────────────────────────────────────────
     const [mobile, setMobile] = useState("");
     const [code, setCode] = useState("");
     const [smsStep, setSmsStep] = useState<"mobile" | "code">("mobile");
@@ -40,7 +37,6 @@ function LoginPage({
     const [smsError, setSmsError] = useState<string | null>(null);
     const [resendIn, setResendIn] = useState(0);
 
-    // Live counters for the intro panel (real business stats, not placeholders).
     const [stats, setStats] = useState<{ totalProperties: number; activeConsultants: number; soldProperties: number; activeListings: number } | null>(null);
 
     useEffect(() => {
@@ -52,7 +48,7 @@ function LoginPage({
           const data = await res.json();
           if (!cancelled) setStats(data);
         } catch {
-          // Non-fatal: the panel just shows placeholders until the next load.
+          // Non-fatal
         }
       })();
       return () => { cancelled = true; };
@@ -70,7 +66,6 @@ function LoginPage({
       }
     }, []);
 
-    // Countdown for the "resend code" link.
     useEffect(() => {
       if (resendIn <= 0) return;
       const timer = setInterval(() => setResendIn((s) => Math.max(0, s - 1)), 1000);
@@ -136,8 +131,6 @@ function LoginPage({
           setSmsError(apiErrorMessage(data, "کد تأیید واردشده صحیح نیست"));
           return;
         }
-        // The server has started an authenticated session; land on the app.
-        // `data.next` is validated server-side, so it cannot redirect off-site.
         window.location.assign(data?.next || "/");
       } catch {
         setSmsError("خطا در ارتباط با سرور");
@@ -197,9 +190,9 @@ function LoginPage({
 
           {loginMethod === "sms" ? (
             <div className="space-y-4">
-              {smsError && (
+              {(smsError || (errors.__all__ && errors.__all__.length > 0)) && (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-                  {smsError}
+                  {smsError || errors.__all__[0]}
                 </div>
               )}
 
@@ -208,7 +201,6 @@ function LoginPage({
                   <Input
                     label="شماره موبایل"
                     type="tel"
-                    inputMode="numeric"
                     placeholder="۰۹۱۲xxxxxxx"
                     value={mobile}
                     onChange={(v) => { setMobile(digitsOnly(v)); setSmsError(null); }}
@@ -244,7 +236,6 @@ function LoginPage({
                   <Input
                     label="کد تأیید"
                     type="tel"
-                    inputMode="numeric"
                     placeholder="کد ۶ رقمی"
                     value={code}
                     onChange={(v) => { setCode(digitsOnly(v).slice(0, 6)); setSmsError(null); }}
@@ -360,10 +351,6 @@ function LoginPage({
     </div>
   );
 }
-
-// =============================================================================
-//  Sidebar
-// =============================================================================
 
 
 export { LoginPage };

@@ -95,8 +95,5 @@ function NotifDrawer({ open, onClose, notifications = [], csrfToken, onOpenTicke
   );
 }
 
-// =============================================================================
-//  Password Reset Request Modal
-// =============================================================================
 
 export { NotifDrawer };

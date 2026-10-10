@@ -4,10 +4,6 @@ import {
   makeAIDescriptionFetcher,
 } from "../../../shared/components/ui/AIDescription";
 
-/**
- * AI description card for a single property (dynamic, driven by the backend).
- * Styled identically to the consultant AI section via the shared AIDescription.
- */
 function PropertyAISummary({
   property,
   csrfToken,

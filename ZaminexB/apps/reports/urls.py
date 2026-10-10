@@ -5,6 +5,7 @@ from .views import (
     PropertyOptionsView,
     PropertyReportExportView,
     PropertyReportView,
+    property_report_print,
 )
 
 app_name = "reports"
@@ -29,5 +30,10 @@ urlpatterns = [
         "api/reports/property-options/",
         PropertyOptionsView.as_view(),
         name="property-report-options",
+    ),
+    path(
+        "reports/properties/<int:property_id>/print/",
+        property_report_print,
+        name="property-report-print",
     ),
 ]

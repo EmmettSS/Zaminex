@@ -1,6 +1,5 @@
 import type { Page, Role } from "./types";
 
-/** A destination the top-bar page search can open. Mirrors the sidebar + settings tabs. */
 export type NavPageItem = {
   page: Page;
   label: string;
@@ -33,6 +32,7 @@ const ADMIN_PAGES: NavPageItem[] = [
   { page: "my-profile-security", label: "امنیت", section: "پروفایل" },
   { page: "settings-workspace", label: "تنظیمات فضای کاری", section: "سیستم", keywords: "تنظیمات" },
   { page: "settings-permissions", label: "دسترسی‌ها", section: "سیستم", keywords: "تنظیمات" },
+  { page: "settings-login-options", label: "گزینه‌های ورود", section: "سیستم", keywords: "تنظیمات رمز پیامک otp" },
 ];
 
 const CONSULTANT_PAGES: NavPageItem[] = [
@@ -53,7 +53,6 @@ const CONSULTANT_PAGES: NavPageItem[] = [
   { page: "settings-permissions", label: "دسترسی‌ها", section: "سیستم", keywords: "تنظیمات" },
 ];
 
-/** Pages the current role can open from the top-bar search. */
 export function getRoleNavPages(role?: Role): NavPageItem[] {
   return role === "admin" ? ADMIN_PAGES : CONSULTANT_PAGES;
 }

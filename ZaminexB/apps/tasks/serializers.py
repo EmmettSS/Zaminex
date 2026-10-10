@@ -31,8 +31,7 @@ class PropertyMiniSerializer(serializers.ModelSerializer):
     price = serializers.SerializerMethodField()
 
     def get_price(self, obj):
-        """Derived from the property's sale listings (see metrics)."""
-        from apps.common.metrics import effective_sale_price
+        from apps.analytics.metrics import effective_sale_price
 
         price = effective_sale_price(obj)
         return str(price) if price is not None else None

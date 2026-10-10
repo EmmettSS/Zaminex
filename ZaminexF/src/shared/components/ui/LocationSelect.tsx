@@ -4,22 +4,10 @@ import { ChevronDown, Search, Check, MapPin } from "lucide-react";
 import { cx } from "../../lib/utils";
 import { fuzzyFilter } from "../../lib/fuzzySearch";
 
-/**
- * Cascading استان → شهر → محله picker.
- *
- * The three levels are administrator-managed, so the whole tree is fetched once
- * from `/basics/api/locations/` and filtered client-side — one request instead
- * of a round trip per dropdown.
- *
- * Now uses searchable comboboxes styled exactly like ConsultantCombobox /
- * DistrictCombobox (MapPin, searchable inside list) as requested.
- */
-
 export type LocationDistrict = { id: number; name: string; displayName: string };
 export type LocationCity = { id: number; name: string; displayName: string; districts: LocationDistrict[] };
 export type LocationProvince = { id: number; name: string; displayName: string; cities: LocationCity[] };
 
-/** Fetches the province → city → district tree once per mount. */
 export function useLocationTree(csrfToken?: string) {
   const [tree, setTree] = useState<LocationProvince[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,10 +34,7 @@ export function useLocationTree(csrfToken?: string) {
   return { tree, loading };
 }
 
-/**
- * Given a district id, find the city and province above it.
- * Used when editing a property, which only stores the leaf.
- */
+
 export function findLocationPath(tree: LocationProvince[], districtId: string | number | null | undefined) {
   if (!districtId) return { provinceId: "", cityId: "" };
   for (const province of tree) {
@@ -62,9 +47,6 @@ export function findLocationPath(tree: LocationProvince[], districtId: string | 
   return { provinceId: "", cityId: "" };
 }
 
-/* ──────────────────────────────────────────────────────────────
-   Searchable combobox styled like ConsultantCombobox / DistrictCombobox
-   ────────────────────────────────────────────────────────────── */
 
 type LocationOption = { id: string | number; displayName: string };
 

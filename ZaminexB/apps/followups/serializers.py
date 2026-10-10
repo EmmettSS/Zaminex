@@ -16,8 +16,6 @@ class FollowUpListSerializer(serializers.ModelSerializer):
     propertyId = serializers.PrimaryKeyRelatedField(source="property", read_only=True)
     property = serializers.CharField(source="property_title", read_only=True)
     isOverdue = serializers.SerializerMethodField()
-    # Recency fields: the frontend orders lists and dashboard widgets by the
-    # newest activity (created or edited) using these.
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
 

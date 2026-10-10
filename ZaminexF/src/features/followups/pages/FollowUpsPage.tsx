@@ -85,9 +85,6 @@ function FollowUpsPage({
     setScheduledDateTo("");
   };
 
-  // Build the server-side filter query. The Jalali picker already converts
-  // its selection to Gregorian "YYYY-MM-DD"; both endpoints are inclusive and
-  // interpreted in Asia/Tehran on the server.
   const filters: FollowUpFilters = useMemo(() => {
     const f: FollowUpFilters = {
       type: typeFilter,
@@ -98,9 +95,6 @@ function FollowUpsPage({
       f.consultantId = consultantFilter || undefined;
       f.propertyId = propertyFilter || undefined;
     } else if (isMyFollowupsList && currentUserId) {
-      // Belt-and-suspenders: the server already scopes non-admins to their
-      // own follow-ups, but state the consultant explicitly so the query is
-      // unambiguous and index-friendly.
       f.consultantId = String(currentUserId);
     }
     return f;
@@ -117,7 +111,6 @@ function FollowUpsPage({
 
   useEffect(() => {
     if (rangeInvalid) {
-      // Don't fire a query with a reversed range; the UI shows the error.
       setRows([]);
       return;
     }
@@ -141,11 +134,6 @@ function FollowUpsPage({
     };
   }, [onLoad, filters, rangeInvalid, refreshKey]);
 
-  // Newest activity first: a follow-up that was created or edited most
-  // recently surfaces at the top, regardless of its scheduled date or
-  // overdue state — the order updates dynamically after every edit. The
-  // server already orders this way, but re-sort defensively so the UI stays
-  // correct regardless of the endpoint used.
   const shown = useMemo(() => {
     return [...rows].sort((a, b) => {
       const timeA = new Date(a.updatedAt || a.createdAt || a.date || 0).getTime();

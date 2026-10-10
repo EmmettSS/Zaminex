@@ -15,8 +15,6 @@ import {
   Upload,
 } from "lucide-react";
 
-// Mirrors MAX_APPRAISAL_SIZE in apps/properties/validators.py. Enforced here
-// for instant feedback; the server re-validates regardless.
 const MAX_APPRAISAL_BYTES = 10 * 1024 * 1024;
 
 function formatFileSize(bytes: number): string {
@@ -27,14 +25,6 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toLocaleString("fa-IR", { maximumFractionDigits: 1 })} مگابایت`;
 }
 
-/**
- * The «گزارش کارشناسی» tab of the property detail page.
- *
- * Holds exactly one PDF per property: uploading a new file replaces the
- * previous one on the server. Upload/delete are limited to the assigned
- * consultant (کارشناس ثبت‌کننده / واگذارشده) and admins — `canManage` —
- * while the download follows the gallery-image read access (`canDownload`).
- */
 function AppraisalReportTab({
   propertyId,
   report,
@@ -66,7 +56,7 @@ function AppraisalReportTab({
 
   const handlePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-picking the same file after an error
+    e.target.value = "";
     if (!file || !onUpload) return;
 
     const localError = validateLocal(file);
@@ -112,8 +102,6 @@ function AppraisalReportTab({
   };
 
   const openInNewTab = (url: string) => {
-    // Same-origin navigation carries the session cookie; the endpoint
-    // answers with Content-Disposition so the browser saves the file.
     window.open(url, "_blank", "noopener");
   };
 

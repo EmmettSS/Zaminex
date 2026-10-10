@@ -7,4 +7,5 @@ class CommonConfig(AppConfig):
     verbose_name = "عمومی و سیستم"
 
     def ready(self):
-        import apps.common.signals  # noqa: F401
+        import apps.common.cache_invalidation
+        from apps.common import checks

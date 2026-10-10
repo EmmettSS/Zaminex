@@ -66,7 +66,6 @@ function ListingsPage({
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [statusModal, setStatusModal] = useState<Listing | null>(null);
 
-  // Server-side pagination
   const [serverListings, setServerListings] = useState<Listing[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [activeCount, setActiveCount] = useState(0);
@@ -225,12 +224,10 @@ function ListingsPage({
     { label: "حذف", icon: <Trash2 size={12} />, onClick: () => setConfirmDelete(String(l.id)), danger: true },
   ];
 
-  // List of listings to compute dynamic KPI statistics from
   const currentListings = useMemo(() => {
     return serverListings.length > 0 ? serverListings : initialListings;
   }, [serverListings, initialListings]);
 
-  // Dynamic Total Views / کل بازدیدها
   const totalViews = useMemo(() => {
     return currentListings.reduce((sum, l) => {
       const v = (l as any).views ?? (l as any).engagementHeatScore ?? 0;
@@ -238,7 +235,6 @@ function ListingsPage({
     }, 0);
   }, [currentListings]);
 
-  // Formatted Total Views
   const formattedTotalViews = useMemo(() => {
     if (totalViews >= 10000) {
       return `${(totalViews / 1000).toLocaleString("fa-IR", { maximumFractionDigits: 1 })}K`;
@@ -246,7 +242,6 @@ function ListingsPage({
     return totalViews.toLocaleString("fa-IR");
   }, [totalViews]);
 
-  // Dynamic Average Quality Score / میانگین امتیاز کیفیت
   const avgQualityScore = useMemo(() => {
     if (currentListings.length === 0) return 0;
     
@@ -305,7 +300,6 @@ function ListingsPage({
         }
       />
 
-      {/* Toolbar — always visible so the search input never loses focus */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="relative min-w-48 flex-1 max-w-64">
           <Search size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -614,7 +608,6 @@ function ListingsPage({
             </>
           )}
 
-          {/* Table view */}
           {view === "table" && (
             <Card className="overflow-hidden">
               <div className="overflow-hidden">

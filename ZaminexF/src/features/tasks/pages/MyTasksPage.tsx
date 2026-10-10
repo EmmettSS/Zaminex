@@ -61,9 +61,6 @@ function MyTasksPage({
   const [selectedTask, setSelectedTask] = useState<TaskRow | null>(null);
   const [confirmDeleteTask, setConfirmDeleteTask] = useState<string | null>(null);
 
-  // For consultants the server already scopes results via assignedTo, so
-  // there is no client-side assignee filtering. For an admin impersonally
-  // viewing "my-tasks" (not a normal flow) keep the explicit own-task guard.
   const effectiveFilters: TaskFilters = useMemo(
     () => ({
       status: statusFilter,
@@ -73,10 +70,6 @@ function MyTasksPage({
     [statusFilter, dueDateFrom, dueDateTo]
   );
 
-  // Reload from the server whenever the filters or an external mutation
-  // change. The backend applies the inclusive due-date range (and status),
-  // using the existing (due_date, status) index, so the list stays correct
-  // even for large datasets and is never a slice of already-paginated data.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -98,8 +91,6 @@ function MyTasksPage({
     };
   }, [onLoad, effectiveFilters, refreshKey]);
 
-  // Keep local rows in sync with the global list when no server fetch has
-  // run yet (initial render) or when the parent pushes new data.
   useEffect(() => {
     setRows(initialTasks);
   }, [initialTasks]);

@@ -1,16 +1,3 @@
-// =============================================================================
-//  Jalali (Shamsi) ↔ Gregorian conversion helpers
-// =============================================================================
-// The database and the API contract stay in Gregorian (the backend's DateFields
-// are Gregorian). This module lets the UI present and accept real Shamsi dates
-// while everything below the surface keeps working in Gregorian:
-//   - convert a Gregorian ISO date ("YYYY-MM-DD") to a Jalali one for display
-//   - convert a Jalali date entered by the user back to Gregorian for storage
-// The algorithm is the standard jalaali (Kazimierz Borkowski) conversion.
-// =============================================================================
-
-// NOTE: the jalaali algorithm needs integer division that truncates toward zero
-// (like `~~` in JS), NOT Math.floor, because the math involves negative values.
 const div = (a: number, b: number) => Math.trunc(a / b);
 const mod = (a: number, b: number) => a - Math.trunc(a / b) * b;
 
@@ -110,7 +97,6 @@ function j2g(jy: number, jm: number, jd: number): GregorianDate {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Persian digits without thousands grouping — years like ۱۴۰۵ must stay ۱۴۰۵, not ۱٬۴۰۵. */
 const faNum = (n: number) => n.toLocaleString("fa-IR", { useGrouping: false });
 
 export const JALALI_MONTHS = [
@@ -118,7 +104,6 @@ export const JALALI_MONTHS = [
   "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
 ];
 
-/** Parse "YYYY-MM-DD" (or "YYYY/MM/DD") into parts, else null. */
 export function parseGregorianISO(v?: string | null): GregorianDate | null {
   if (!v) return null;
   const m = String(v).match(/^(\d{4})[-/](\d{2})[-/](\d{2})/);
@@ -130,27 +115,23 @@ export function parseGregorianISO(v?: string | null): GregorianDate | null {
   return { gy, gm, gd };
 }
 
-/** Gregorian "YYYY-MM-DD" → Jalali object. */
 export function gregorianToJalali(v?: string | null): JalaliDate | null {
   const g = parseGregorianISO(v);
   if (!g) return null;
   return g2j(g.gy, g.gm, g.gd);
 }
 
-/** Today (now) as a Jalali object. */
 export function todayJalali(): JalaliDate {
   const n = new Date();
   return g2j(n.getFullYear(), n.getMonth() + 1, n.getDate());
 }
 
-/** Gregorian "YYYY-MM-DD" → Jalali "YYYY-MM-DD" string (for display). */
 export function toJalaliISO(v?: string | null): string {
   const j = gregorianToJalali(v);
   if (!j) return "";
   return `${j.jy}-${pad(j.jm)}-${pad(j.jd)}`;
 }
 
-/** Jalali "YYYY-MM-DD" → Gregorian "YYYY-MM-DD" string (for storage/API). */
 export function jalaliToGregorianISO(v?: string | null): string {
   if (!v) return "";
   const m = String(v).match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
@@ -164,34 +145,25 @@ export function jalaliToGregorianISO(v?: string | null): string {
   return `${g.gy}-${pad(g.gm)}-${pad(g.gd)}`;
 }
 
-/** Days in a given Jalali month (1–12). */
 export function daysInJalaliMonth(jy: number, jm: number): number {
   if (jm <= 6) return 31;
   if (jm < 12) return 30;
-  // In the jalaali convention a Jalali leap year has `leap === 0`
-  // (Esfand gets 30 days instead of 29).
   const r = jalCal(jy);
   return r.leap === 0 ? 30 : 29;
 }
 
-/**
- * Weekday (0..6) of the first day of a Jalali month, aligned to the Persian
- * week that starts on Saturday: 0 = شنبه, 1 = یکشنبه, ... 6 = جمعه.
- */
 export function firstWeekdayOfJalaliMonth(jy: number, jm: number): number {
   const g = j2g(jy, jm, 1);
-  const jsDay = new Date(g.gy, g.gm - 1, g.gd).getDay(); // 0=Sun .. 6=Sat
+  const jsDay = new Date(g.gy, g.gm - 1, g.gd).getDay();
   return (jsDay + 1) % 7;
 }
 
-/** Gregorian ISO → Jalali, rendered as "ماه سال" (e.g. "آذر ۱۴۰۴"). */
 export function jalaliMonthLabel(v?: string | null): string {
   const j = gregorianToJalali(v);
   if (!j) return "";
   return `${JALALI_MONTHS[j.jm - 1]} ${faNum(j.jy)}`;
 }
 
-/** Gregorian ISO → full Jalali, e.g. "۱۲ آذر ۱۴۰۴". */
 export function formatJalali(v?: string | null, withYear = true): string {
   const j = gregorianToJalali(v);
   if (!j) return "—";
@@ -201,16 +173,11 @@ export function formatJalali(v?: string | null, withYear = true): string {
   return `${day} ${month} ${faNum(j.jy)}`;
 }
 
-/** Gregorian datetime → Jalali date (time dropped), used for display. */
 export function formatJalaliFromDT(v?: string | null, withYear = true): string {
   if (!v) return "—";
   return formatJalali(String(v).split("T")[0], withYear);
 }
 
-/**
- * Gregorian ISO datetime → Jalali date + time, e.g. "۲۰ مرداد ۱۴۰۵، ۱۴:۳۰".
- * Accepts "YYYY-MM-DDTHH:MM:SS" or "YYYY-MM-DD HH:MM".
- */
 export function formatJalaliDT(v?: string | null): string {
   if (!v) return "—";
   const s = String(v).replace(" ", "T");
@@ -221,21 +188,12 @@ export function formatJalaliDT(v?: string | null): string {
   return `${dateLabel}، ${hm}`;
 }
 
-// -----------------------------------------------------------------------------
-//  Date-range comparison helpers (Gregorian, shared across filter UIs)
-// -----------------------------------------------------------------------------
-// The API and database stay Gregorian. The Jalali picker emits Gregorian
-// "YYYY-MM-DD" bounds (`from`/`to`), and both endpoints are inclusive. These
-// helpers centralise that contract so list screens don't re-implement it.
-
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Strict Gregorian "YYYY-MM-DD" check used to ignore empty/invalid bounds. */
 export function isISODate(v: string | null | undefined): v is string {
   return typeof v === "string" && ISO_DATE_RE.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`));
 }
 
-/** True when `date` ("YYYY-MM-DD") lies within the inclusive [from, to] range. Missing bounds are open. */
 export function isDateInRange(
   date: string | null | undefined,
   from: string | null | undefined,
@@ -247,15 +205,6 @@ export function isDateInRange(
   return true;
 }
 
-/**
- * Convert any ISO-8601 datetime (e.g. "2026-07-15T21:00:00Z") to its
- * Asia/Tehran calendar date as "YYYY-MM-DD".
- *
- * This is the correct replacement for `value.slice(0, 10)` on timezone-aware
- * datetimes: with the server storing UTC, a follow-up scheduled just after
- * Tehran midnight serialises to the previous UTC day, and slicing drops it by
- * a day. Formatting in the business timezone first avoids that off-by-one.
- */
 export function tehranCalendarDate(value: string | null | undefined): string {
   if (!value) return "";
   const d = new Date(value);
@@ -275,7 +224,6 @@ export function tehranCalendarDate(value: string | null | undefined): string {
   return y && m && day ? `${y}-${m}-${day}` : "";
 }
 
-/** True when an ISO datetime's Asia/Tehran calendar day is within [from, to]. */
 export function isDateTimeInTehranRange(
   value: string | null | undefined,
   from: string | null | undefined,
@@ -284,7 +232,6 @@ export function isDateTimeInTehranRange(
   return isDateInRange(tehranCalendarDate(value), from, to);
 }
 
-/** True when both bounds are valid and `from` is strictly after `to`. */
 export function isInvalidDateOrder(
   from: string | null | undefined,
   to: string | null | undefined,
@@ -292,10 +239,6 @@ export function isInvalidDateOrder(
   return Boolean(from && to && from > to);
 }
 
-/**
- * Gregorian ISO datetime → Jalali date + clock in Asia/Tehran.
- * Year/day digits are ungrouped (۱۴۰۵ not ۱٬۴۰۵).
- */
 export function formatJalaliDateTime(v?: string | null): { date: string; time: string; full: string } {
   if (!v) return { date: "—", time: "", full: "—" };
   const d = new Date(v);

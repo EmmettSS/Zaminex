@@ -1,25 +1,3 @@
-"""Move pricing off the property and onto its listings.
-
-The client's correction: a property is a physical thing, money is a commercial
-term. One property may be advertised for sale *and* for rent at the same time,
-so a single price column on the property cannot represent reality.
-
-    Property.price + Property.deal_type   →   Listing.sale_price
-                                              Listing.deposit / monthly_rent
-
-For each property this command:
-
-* copies the price onto every listing of that property that has none yet,
-  choosing the column that matches the listing's deal type;
-* creates a listing for properties that have none, so the recorded price is
-  never silently dropped.
-
-Idempotent — listings that already carry a price are left untouched.
-
-    python manage.py move_pricing_to_listings --dry-run
-    python manage.py move_pricing_to_listings
-"""
-
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand
@@ -30,7 +8,6 @@ from apps.basics.models import DealType
 from apps.listings.models import Listing
 from apps.properties.models import Property
 
-# Which listing column a deal type fills in.
 RENTAL_DEAL_TYPES = {"mortgage_rent", "full_mortgage"}
 
 
@@ -45,11 +22,6 @@ class Command(BaseCommand):
         )
 
     def _apply_price(self, listing, price, deal_name):
-        """Put the amount in the column the deal type calls for.
-
-        A rental listing's legacy price is treated as the deposit (رهن), which
-        is how the amount was being entered before pricing was split out.
-        """
         if deal_name in RENTAL_DEAL_TYPES:
             listing.deposit = price
         else:
@@ -93,7 +65,6 @@ class Command(BaseCommand):
                         f"    آگهی #{listing.id} ({deal_name}) ← {price:,.0f}"
                     )
             else:
-                # No listing yet: create one so the price survives the move.
                 deal_name = "mortgage_rent" if prop.deal_type == "RENT" else "sale"
                 deal_type = DealType.objects.filter(name=deal_name).first()
 

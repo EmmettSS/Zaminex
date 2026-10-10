@@ -1,13 +1,3 @@
-"""End-to-end tests for what the wizards now send and receive (phase 3).
-
-Covers the two changes the client asked for:
-
-* a property is created without a price or a deal type, carrying whatever
-  custom fields its property type defines;
-* price and deal type belong to the listing, so one property can be advertised
-  for sale and for rent at the same time.
-"""
-
 import io
 
 from django.contrib.auth import get_user_model
@@ -22,8 +12,6 @@ User = get_user_model()
 
 
 class PropertyWizardPayloadTests(TestCase):
-    """The exact shape AddPropertyWizard posts."""
-
     @classmethod
     def setUpTestData(cls):
         call_command("seed_basics", stdout=io.StringIO())
@@ -49,35 +37,40 @@ class PropertyWizardPayloadTests(TestCase):
             "district": "مرکزی",
             "fullAddress": "تهران",
             "consultant": self.agent.pk,
+            "ownerFirstName": "تست",
+            "ownerLastName": "تستی",
+            "ownerPhone": "09121234567",
         }
         payload.update(overrides)
         return payload
 
+    def _created_property(self, response):
+        self.assertEqual(response.status_code, 201, response.content[:400])
+        return Property.objects.get(pk=response.json()["id"])
+
     def test_a_property_is_created_without_a_price(self):
-        """Price moved to the listing, so it must no longer be required."""
         response = self.client.post(
             "/properties/api/properties/", self._payload(), content_type="application/json"
         )
         self.assertEqual(response.status_code, 201, response.content[:400])
 
-        prop = Property.objects.get(internal_code="WIZ-1")
+        prop = self._created_property(response)
         self.assertIsNone(prop.price)
 
     def test_the_legacy_type_column_is_kept_in_sync(self):
-        """Existing readers still use `property_type`, so it must stay correct."""
-        self.client.post(
+        response = self.client.post(
             "/properties/api/properties/", self._payload(), content_type="application/json"
         )
-        prop = Property.objects.get(internal_code="WIZ-1")
+        prop = self._created_property(response)
 
         self.assertEqual(prop.property_type_ref, self.apartment)
         self.assertEqual(prop.property_type, "APARTMENT")
 
     def test_the_usage_is_derived_from_the_type(self):
-        self.client.post(
+        response = self.client.post(
             "/properties/api/properties/", self._payload(), content_type="application/json"
         )
-        prop = Property.objects.get(internal_code="WIZ-1")
+        prop = self._created_property(response)
         self.assertEqual(prop.property_usage.name, "residential")
 
     def test_custom_fields_are_stored_and_returned(self):
@@ -104,7 +97,6 @@ class PropertyWizardPayloadTests(TestCase):
         self.assertEqual(labels["نوع سند"], "تک برگ")
 
     def test_an_attribute_of_another_type_is_rejected(self):
-        """Land has no `rooms`, so sending a land-only field for a flat fails."""
         response = self.client.post(
             "/properties/api/properties/",
             self._payload(attributes={"not_a_real_field": 1}),
@@ -122,12 +114,12 @@ class PropertyWizardPayloadTests(TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_updating_replaces_a_value_and_clears_another(self):
-        self.client.post(
+        response = self.client.post(
             "/properties/api/properties/",
             self._payload(attributes={"total_floors": 10, "parking": True}),
             content_type="application/json",
         )
-        prop = Property.objects.get(internal_code="WIZ-1")
+        prop = self._created_property(response)
 
         response = self.client.patch(
             f"/properties/api/properties/{prop.pk}/",
@@ -155,8 +147,6 @@ class PropertyWizardPayloadTests(TestCase):
 
 
 class ListingPricingTests(TestCase):
-    """Deal type and money live on the listing."""
-
     @classmethod
     def setUpTestData(cls):
         call_command("seed_basics", stdout=io.StringIO())
@@ -188,7 +178,7 @@ class ListingPricingTests(TestCase):
             {
                 "title": "فروش",
                 "property": self.property.pk,
-                "publish_channel": "WEBSITE",
+                "publishChannel": "WEBSITE",
                 "dealType": self.sale.pk,
                 "salePrice": 18_000_000_000,
             },
@@ -207,7 +197,7 @@ class ListingPricingTests(TestCase):
             {
                 "title": "رهن و اجاره",
                 "property": self.property.pk,
-                "publish_channel": "WEBSITE",
+                "publishChannel": "WEBSITE",
                 "dealType": self.rent.pk,
                 "deposit": 800_000_000,
                 "monthlyRent": 45_000_000,
@@ -222,19 +212,18 @@ class ListingPricingTests(TestCase):
         self.assertIsNone(body["salePrice"])
 
     def test_one_property_can_be_for_sale_and_for_rent_at_once(self):
-        """The reason pricing had to leave the property record."""
         for payload in (
             {
                 "title": "فروش",
                 "property": self.property.pk,
-                "publish_channel": "WEBSITE",
+                "publishChannel": "WEBSITE",
                 "dealType": self.sale.pk,
                 "salePrice": 18_000_000_000,
             },
             {
                 "title": "اجاره",
                 "property": self.property.pk,
-                "publish_channel": "WEBSITE",
+                "publishChannel": "WEBSITE",
                 "dealType": self.rent.pk,
                 "deposit": 800_000_000,
                 "monthlyRent": 45_000_000,
@@ -265,7 +254,7 @@ class ListingPricingTests(TestCase):
             {
                 "title": "با کمیسیون",
                 "property": self.property.pk,
-                "publish_channel": "WEBSITE",
+                "publishChannel": "WEBSITE",
                 "dealType": self.sale.pk,
                 "attributes": {"commission": "2.5"},
             },
@@ -276,8 +265,6 @@ class ListingPricingTests(TestCase):
 
 
 class PricingMigrationTests(TestCase):
-    """`move_pricing_to_listings` must not lose a recorded price."""
-
     @classmethod
     def setUpTestData(cls):
         call_command("seed_basics", stdout=io.StringIO())
@@ -365,8 +352,6 @@ class PricingMigrationTests(TestCase):
 
 
 class NullPriceRobustnessTests(TestCase):
-    """Metrics must cope with the price column now being nullable."""
-
     @classmethod
     def setUpTestData(cls):
         call_command("seed_basics", stdout=io.StringIO())
@@ -397,8 +382,7 @@ class NullPriceRobustnessTests(TestCase):
         )
 
     def test_the_neighbourhood_average_ignores_properties_without_a_price(self):
-        """Treating a missing price as zero would halve the average."""
-        from apps.common.metrics import build_neighborhood_price_per_sqm_map
+        from apps.analytics.metrics import build_neighborhood_price_per_sqm_map
 
         averages = build_neighborhood_price_per_sqm_map()
         self.assertEqual(averages["مشترک"], 10_000_000)

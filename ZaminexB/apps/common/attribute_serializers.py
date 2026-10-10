@@ -1,20 +1,3 @@
-"""Reusable serializer mixin for reading and writing dynamic attributes.
-
-Both the property and the listing API accept the same shape:
-
-    {
-      ...,
-      "attributes": {"total_floors": 12, "parking": true, "document_type": "single_deed"}
-    }
-
-and return the stored values back under ``attributes``, plus a
-``attributeDetails`` list carrying labels and units so a detail page can render
-them without re-fetching the schema.
-
-Keeping this in one mixin means the property and listing endpoints cannot drift
-apart in how they validate or persist attribute values.
-"""
-
 from __future__ import annotations
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -22,26 +5,12 @@ from rest_framework import serializers
 
 
 class AttributeValuesMixin:
-    """Adds an ``attributes`` field backed by an EAV value model.
-
-    Subclasses must define:
-        attribute_value_model  – e.g. PropertyAttributeValue
-        attribute_owner_field  – e.g. "property"
-        attribute_entity       – Attribute.Entity.PROPERTY
-    """
-
     attribute_value_model = None
     attribute_owner_field = None
     attribute_entity = None
 
     @staticmethod
     def _attribute_values(obj):
-        """Stored values, reusing the prefetch cache when the view set one.
-
-        Calling ``.select_related()`` here would discard a
-        ``prefetch_related("attribute_values__attribute")`` and re-query once
-        per row, so the cache is checked first.
-        """
         cache = getattr(obj, "_prefetched_objects_cache", None)
         if cache is not None and "attribute_values" in cache:
             return sorted(
@@ -55,14 +24,12 @@ class AttributeValuesMixin:
         )
 
     def get_attributes(self, obj) -> dict:
-        """Stored values keyed by the attribute's system name."""
         return {
             value.attribute.name: value.value
             for value in self._attribute_values(obj)
         }
 
     def get_attributeDetails(self, obj) -> list:
-        """Label/unit/display metadata for rendering a read-only view."""
         details = []
         for value in self._attribute_values(obj):
             attribute = value.attribute
@@ -79,10 +46,7 @@ class AttributeValuesMixin:
             )
         return details
 
-    # -- write side ---------------------------------------------------------
-
     def _pop_attribute_payload(self):
-        """Take the raw ``attributes`` dict off the incoming request."""
         request = self.context.get("request")
         if request is None:
             return None
@@ -96,12 +60,6 @@ class AttributeValuesMixin:
         return payload
 
     def _save_attribute_values(self, instance, payload: dict):
-        """Persist ``{name: value}`` against ``instance``.
-
-        Unknown or core attributes are rejected rather than ignored, so a typo
-        in the frontend surfaces immediately instead of silently dropping data.
-        An explicit ``None``/`""` clears the stored value.
-        """
         from apps.basics.models import Attribute
 
         if not payload:
@@ -161,7 +119,6 @@ class AttributeValuesMixin:
             raise serializers.ValidationError({"attributes": errors})
 
     def _validate_required_attributes(self, instance, type_obj, link_manager_name):
-        """Ensure every attribute marked required for this type has a value."""
         if type_obj is None:
             return
 
@@ -173,7 +130,6 @@ class AttributeValuesMixin:
         for link in links:
             attribute = link.attribute
             if attribute.is_core:
-                # Core attributes are ordinary model fields; DRF validates them.
                 continue
             owner = {self.attribute_owner_field: instance}
             exists = self.attribute_value_model.objects.filter(

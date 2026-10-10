@@ -23,9 +23,6 @@ function Badge({ label, variant = "default", dot }: { label: string; variant?: B
   );
 }
 
-// -----------------------------------------------------------------------------
-//  Standard Persian real estate CRM translators
-// -----------------------------------------------------------------------------
 export const toPersianType = (type?: string | null): string => {
   const map: Record<string, string> = {
     "Apartment": "آپارتمان", "APARTMENT": "آپارتمان", "apartment": "آپارتمان",
@@ -130,7 +127,6 @@ export const toPersianChannel = (ch?: string | null): string => {
 
 function statusBadge(status: string) {
   const map: Record<string, { label: string; variant: BadgeV }> = {
-    // Property statuses
     "Available": { label: "آماده واگذاری", variant: "success" },
     "AVAILABLE": { label: "آماده واگذاری", variant: "success" },
     "available": { label: "آماده واگذاری", variant: "success" },
@@ -147,7 +143,6 @@ function statusBadge(status: string) {
     "INACTIVE": { label: "بایگانی‌شده", variant: "muted" },
     "inactive": { label: "بایگانی‌شده", variant: "muted" },
 
-    // Listing statuses
     "Published": { label: "منتشرشده (فعال)", variant: "success" },
     "PUBLISHED": { label: "منتشرشده (فعال)", variant: "success" },
     "ACTIVE": { label: "منتشرشده (فعال)", variant: "success" },
@@ -167,7 +162,6 @@ function statusBadge(status: string) {
     "ARCHIVED": { label: "بایگانی‌شده", variant: "muted" },
     "Archived": { label: "بایگانی‌شده", variant: "muted" },
 
-    // Task statuses
     "Pending": { label: "در انتظار انجام", variant: "muted" },
     "PENDING": { label: "در انتظار انجام", variant: "muted" },
     "In Progress": { label: "در حال انجام", variant: "info" },
@@ -181,7 +175,6 @@ function statusBadge(status: string) {
     "CANCELLED": { label: "لغوشده", variant: "danger" },
     "cancelled": { label: "لغوشده", variant: "danger" },
 
-    // Priorities
     "urgent": { label: "اولویت فوری", variant: "danger" },
     "URGENT": { label: "اولویت فوری", variant: "danger" },
     "high": { label: "اولویت بالا", variant: "warning" },
@@ -191,7 +184,6 @@ function statusBadge(status: string) {
     "low": { label: "اولویت کم", variant: "muted" },
     "LOW": { label: "اولویت کم", variant: "muted" },
 
-    // Follow up types & actions
     "Call": { label: "تماس تلفنی", variant: "info" },
     "CALL": { label: "تماس تلفنی", variant: "info" },
     "call": { label: "تماس تلفنی", variant: "info" },

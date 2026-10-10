@@ -19,7 +19,7 @@ import { PropertyCombobox } from "../../../shared/components/ui/PropertyCombobox
 import { ConsultantCombobox } from "../../../shared/components/ui/ConsultantCombobox";
 import { DistrictCombobox } from "../../../shared/components/ui/DistrictCombobox";
 import { apiFetch, readJson, apiErrorMessage, getCsrfToken } from "../../../shared/lib/apiClient";
-import { toast, requiredFieldMsg } from "../../../shared/lib/utils";
+import { toast, requiredFieldMsg, validateCoordinatePair, ownerPhoneError, normalizePhone } from "../../../shared/lib/utils";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis } from "recharts";
 import { Building2, FileText, CheckSquare, BellRing, Users, Activity, Settings, Plus, RefreshCw, Eye, Edit2, Trash2, Archive, Clock, MapPin, Check, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, SlidersHorizontal, ArrowUpRight, LayoutGrid, List, Download, Search, MoreVertical, Phone, Mail, Calendar, TrendingUp, Star, Shield, Lock, Key, Send, Loader2, AlertTriangle, Info, XCircle, CheckCircle2, TriangleAlert, Columns, MessageSquare, Sparkles, GripVertical, Building, History, Flame, Image, Zap, LayoutDashboard, Command, Filter, Award, BarChart3, Layers, User, UserRound, Upload } from "lucide-react";
 import { TRANSACTION_TYPES } from "../../../shared/lib/constants";
@@ -52,15 +52,10 @@ function AddPropertyWizard({
   csrfToken?: string;
 }) {
   const [step, setStep] = useState(1);
-  // `price` and `transactionType` are gone: a property is a physical asset, and
-  // the money side (price, rent, deposit) is recorded on each listing, since one
-  // property can be advertised for sale and for rent at the same time.
   const [form, setForm] = useState({ title: "", internalCode: "", propertyTypeRef: "", beds: "", area: "", floor: "", constructionYear: "", provinceId: "", cityId: "", districtId: "", latitude: "", longitude: "", fullAddress: "", description: "", consultant: "", ownerFirstName: "", ownerLastName: "", ownerPhone: "" });
   const [gallery, setGallery] = useState<File[]>([]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // Property types are administrator-managed rows, and each one decides which
-  // custom fields this form shows.
   const { catalog } = useBasicsCatalog(csrfToken);
   const { tree: locationTree } = useLocationTree(csrfToken);
   const { schema, loading: schemaLoading } = useAttributeSchema("property", form.propertyTypeRef, csrfToken);
@@ -70,21 +65,30 @@ function AddPropertyWizard({
     clearFieldError(name);
   };
 
-  // Selecting a different property type swaps the whole custom-field set, so
-  // values captured for the previous type would no longer be meaningful.
   useEffect(() => { setAttributes({}); }, [form.propertyTypeRef]);
 
-  // Default to the first available type once the catalogue arrives.
   useEffect(() => {
     if (!form.propertyTypeRef && catalog?.propertyTypes?.length) {
       setForm((p) => ({ ...p, propertyTypeRef: String(catalog.propertyTypes[0].id) }));
     }
   }, [catalog, form.propertyTypeRef]);
 
+  useEffect(() => {
+    if (!csrfToken) return;
+    let cancelled = false;
+    apiFetch("/properties/api/properties/next-internal-code/", { method: "GET" }, csrfToken)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.internalCode) {
+          setForm((p) => ({ ...p, internalCode: data.internalCode }));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [csrfToken]);
+
   const total = 5;
   const labels = ["اطلاعات پایه", "جزئیات", "موقعیت", "رسانه", "بررسی نهایی"];
-  // Landing page after submit/cancel: admins own the "properties" center,
-  // consultants land back on their "ملک های من" tab.
   const propertiesPage = role === "admin" ? "properties" : "my-properties";
 
   const REQUIRED_LABELS: Record<string, string> = {
@@ -140,7 +144,6 @@ function AddPropertyWizard({
     };
   }, [locationTree, form.provinceId, form.cityId, form.districtId]);
 
-  /** Filled-in custom fields, rendered as review rows with their Persian labels. */
   const reviewAttributeRows = useMemo<[string, string][]>(() => {
     if (!schema) return [];
     return [...schema.fields, ...schema.facilities]
@@ -168,6 +171,10 @@ function AddPropertyWizard({
     requiredForStep(s).forEach((k) => {
       if (!String((form as Record<string, any>)[k] ?? "").trim()) errs[k] = requiredFieldMsg(REQUIRED_LABELS[k]);
     });
+    if (s === 1) {
+      const phoneErr = ownerPhoneError(form.ownerPhone);
+      if (phoneErr) errs["ownerPhone"] = phoneErr;
+    }
     setFieldErrors((prev) => {
       const next = { ...prev };
       requiredForStep(s).forEach((k) => { delete next[k]; });
@@ -178,7 +185,6 @@ function AddPropertyWizard({
   };
   const goNextStep = () => { if (validateStep(step)) setStep(step + 1); };
 
-  /** Custom fields the selected property type marks as required. */
   const validateAttributes = (): boolean => {
     if (!schema) return true;
     const errs: Record<string, string> = {};
@@ -202,6 +208,21 @@ function AddPropertyWizard({
     return true;
   };
 
+  const [coordError, setCoordError] = useState<string | null>(null);
+  const handleConfirmCoordinates = () => {
+    const result = validateCoordinatePair(form.latitude, form.longitude);
+    if (result.state === "empty") {
+      setCoordError("برای تایید، هر دو مختصات را وارد کنید یا موقعیت را از روی نقشه انتخاب کنید.");
+      return;
+    }
+    if (result.state === "invalid") {
+      setCoordError(result.error);
+      return;
+    }
+    setCoordError(null);
+    setForm((p) => ({ ...p, latitude: String(result.value[0]), longitude: String(result.value[1]) }));
+  };
+
   const mapFormToPayload = () => ({
     title: form.title,
     internalCode: form.internalCode,
@@ -218,7 +239,7 @@ function AddPropertyWizard({
     consultant: form.consultant || null,
     ownerFirstName: form.ownerFirstName,
     ownerLastName: form.ownerLastName,
-    ownerPhone: form.ownerPhone,
+    ownerPhone: normalizePhone(form.ownerPhone),
     attributes,
   });
 
@@ -280,7 +301,7 @@ function AddPropertyWizard({
             <h2 className="text-base font-semibold mb-1">اطلاعات پایه</h2>
             <Input label="عنوان ملک" placeholder="مثال: برج مسکونی نیاوران - واحد ۱۲۰۴" value={form.title} onChange={(v) => set("title", v)} error={fieldErrors.title} required />
             <div className="grid grid-cols-2 gap-4">
-              <Input label="کد داخلی" placeholder="مثال: ZX-1204-NY" value={form.internalCode} onChange={() => {}} readOnly error={fieldErrors.internalCode} required />
+              <Input label="کد داخلی" placeholder="در حال تخصیص توسط سیستم…" value={form.internalCode} onChange={() => {}} readOnly error={fieldErrors.internalCode} required />
               <SelectField
                 label="نوع ملک"
                 value={form.propertyTypeRef}
@@ -359,12 +380,30 @@ function AddPropertyWizard({
               required
             />
             <Input label="آدرس کامل" placeholder="مثال: مازندران، ساری، بلوار پاسداران، خیابان گلستان، پلاک ۱۴" value={form.fullAddress} onChange={(v) => set("fullAddress", v)} error={fieldErrors.fullAddress} required />
+            <div className="pt-2 border-t border-border">
+              <h3 className="text-sm font-semibold mb-1 flex items-center gap-1.5">
+                <MapPin size={14} />
+                موقعیت جغرافیایی
+              </h3>
+              <p className="text-[11px] text-muted-foreground mb-3">برای ثبت موقعیت ملک، طول و عرض جغرافیایی را وارد کنید یا از روی نقشه انتخاب کنید.</p>
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <Input label="عرض جغرافیایی" placeholder="مثال: 36.563421" value={form.latitude} onChange={(v) => { set("latitude", v); setCoordError(null); }} />
+                </div>
+                <div className="flex-1">
+                  <Input label="طول جغرافیایی" placeholder="مثال: 53.060112" value={form.longitude} onChange={(v) => { set("longitude", v); setCoordError(null); }} />
+                </div>
+                <Btn variant="secondary" onClick={handleConfirmCoordinates}><Check size={14} />تایید</Btn>
+              </div>
+              {coordError && <p className="text-xs text-destructive mt-2">{coordError}</p>}
+            </div>
             <PropertyMapPicker
               value={form.latitude && form.longitude ? [Number(form.latitude), Number(form.longitude)] : null}
-              onChange={(p) => setForm((s) => ({ ...s, latitude: String(p[0]), longitude: String(p[1]) }))}
+              onChange={(p) => { setForm((s) => ({ ...s, latitude: String(p[0]), longitude: String(p[1]) })); setCoordError(null); }}
               provinceName={selectedLocationNames.provinceName}
               cityName={selectedLocationNames.cityName}
               districtName={selectedLocationNames.districtName}
+              csrfToken={csrfToken}
             />
           </div>
         )}
@@ -439,8 +478,5 @@ function AddPropertyWizard({
   );
 }
 
-// =============================================================================
-//  Edit Property Workspace
-// =============================================================================
 
 export { AddPropertyWizard };

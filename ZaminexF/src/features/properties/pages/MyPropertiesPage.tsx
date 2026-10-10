@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { cx } from "../../../shared/lib/utils";
 import { Page, Role, Property, ConsultantItem, BadgeV } from "../../../shared/lib/types";
 import { toPersianType, toPersianPropertyStatus, consultantLabel } from "../../../shared/lib/utils";
-import { fuzzyFilter } from "../../../shared/lib/fuzzySearch";
 import { Badge } from "../../../shared/components/ui/Badge";
 import { Btn } from "../../../shared/components/ui/Btn";
 import { Card } from "../../../shared/components/ui/Card";
@@ -27,18 +26,10 @@ import {
   SlidersHorizontal, LayoutGrid, List, Users, Phone, UserRound,
 } from "lucide-react";
 
-/**
- * Consultant-facing property list.
- *
- * `variant === "mine"` shows only the current consultant's own (+ shared)
- * properties and exposes the owner contact (the consultant registered them).
- * `variant === "all"` shows every property in the system (fetched via the
- * `scope=all` endpoint) and intentionally omits the owner contact, since
- * those records belong to other consultants.
- */
 function PropertiesListView({
   navigate,
   properties,
+  consultants,
   consultantId,
   openPropertyDetail,
   openPropertyEdit,
@@ -48,7 +39,8 @@ function PropertiesListView({
   variant = "mine",
 }: {
   navigate: (p: Page) => void;
-  properties: Property[];
+  properties?: Property[];
+  consultants?: ConsultantItem[];
   openPropertyDetail: (id: string) => void;
   openPropertyEdit: (id: string) => void;
   consultantId: string | null;
@@ -86,28 +78,54 @@ function PropertiesListView({
     return (city.districts || []).map((d: any) => d.displayName);
   })();
 
-  // For the "mine" variant, restrict to the current consultant's own properties
-  // plus any shared ones; the "all" variant uses every property passed in.
-  const mine = useMemo(() => {
-    return (properties ?? []).filter((p) => {
-      const isOwn = String(p.consultantId ?? p.consultant ?? "") === String(consultantId ?? "");
-      const isShared = (p as any).isShared === true;
-      return isOwn || isShared;
-    });
-  }, [properties, consultantId]);
+  const [serverProperties, setServerProperties] = useState<Property[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [serverLoading, setServerLoading] = useState(false);
 
-  const source = variant === "all" ? properties ?? [] : mine;
+  const fetchServerProperties = useCallback(async () => {
+    setServerLoading(true);
+    try {
+      const params = new URLSearchParams();
+      params.append("page", String(currentPage));
+      params.append("page_size", String(pageSize));
+      if (variant === "all") params.append("scope", "all");
+      if (search.trim()) params.append("q", search.trim());
+      if (filters.consultant) params.append("consultantId", filters.consultant);
+      if (propertyTypeRef) params.append("propertyTypeRef", propertyTypeRef);
+      if (filters.city) params.append("city", filters.city);
+      if (filters.district) params.append("district", filters.district);
+      if (filters.propertyStatus) params.append("propertyStatus", filters.propertyStatus);
 
-  // The consultant filter is always useful on the all-properties tab (records
-  // span every consultant); on the "mine" tab it is only shown when shared
-  // properties from other consultants are visible.
-  const hasSharedProperties = mine.some((p) => (p as any).isShared);
+      const res = await apiFetch(`/properties/api/properties/?${params.toString()}`, { method: "GET" }, csrfToken);
+      if (!res.ok) throw new Error("خطا در دریافت املاک");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setServerProperties(data);
+        setTotalCount(data.length);
+      } else {
+        const results = data.results ?? [];
+        setServerProperties(results);
+        setTotalCount(data.count ?? results.length);
+      }
+    } catch (err) {
+      console.error("Error fetching properties:", err);
+      setServerProperties([]);
+      setTotalCount(0);
+    } finally {
+      setServerLoading(false);
+    }
+  }, [currentPage, pageSize, search, filters, propertyTypeRef, variant, csrfToken]);
+
+  useEffect(() => {
+    fetchServerProperties();
+  }, [fetchServerProperties]);
+
+  const source = serverProperties;
+
+  const hasSharedProperties = source.some((p) => (p as any).isShared);
   const showConsultantFilter =
     variant === "all" ? source.length > 0 : hasSharedProperties;
 
-  // Build the consultant filter options (formatted for ConsultantCombobox): the
-  // current consultant themselves, plus every consultant who owns a property in
-  // the current source list.
   const consultantOptions = useMemo<ConsultantItem[]>(() => {
     const seen = new Map<string, ConsultantItem>();
     const add = (id: string, name: string) => {
@@ -118,7 +136,7 @@ function PropertiesListView({
         user: { id, username: name, role: "AGENT", name, email: "", mobile: "" },
       } as any);
     };
-    // Always include the current consultant so they can filter to their own properties.
+    
     if (consultantId) {
       const selfProp = source.find(
         (p) => String(p.consultantId ?? p.consultant ?? "") === String(consultantId)
@@ -128,82 +146,29 @@ function PropertiesListView({
         selfProp?.consultantName || consultantLabel(selfProp || {}) || userName || "من"
       );
     }
-    source.forEach((p) => {
-      add(
-        String(p.consultantId ?? p.consultant ?? ""),
-        p.consultantName || consultantLabel(p) || "نامشخص"
-      );
-    });
+    if (variant === "all" && consultants && consultants.length > 0) {
+      consultants.forEach((c) => {
+        add(
+          String(c.user?.id ?? c.id),
+          c.full_name || c.user?.username || "نامشخص"
+        );
+      });
+    } else {
+      source.forEach((p) => {
+        add(
+          String(p.consultantId ?? p.consultant ?? ""),
+          p.consultantName || consultantLabel(p) || "نامشخص"
+        );
+      });
+    }
     return Array.from(seen.values());
-  }, [source, consultantId, userName]);
+  }, [source, consultants, variant, consultantId, userName]);
 
-  // Apply search and filters
-  const filtered = useMemo(() => {
-    let result = source;
-
-    // Search — same fuzzy gateway the comboboxes use (similar + typo-tolerant).
-    if (search.trim()) {
-      result = fuzzyFilter(
-        result,
-        search,
-        (p) =>
-          [
-            p.title,
-            p.internalCode,
-            p.district,
-            p.neighborhood,
-            (p as any).locationPath,
-            p.fullAddress,
-            p.consultantName,
-            (p as any).cityName,
-            (p as any).provinceName,
-          ]
-            .filter(Boolean)
-            .join(" ")
-      );
-    }
-
-    // Consultant filter. `mine` already contains only the current consultant's
-    // own properties plus shared properties, so filtering by consultant id is
-    // enough: selecting the current consultant shows their own properties, and
-    // selecting another consultant shows that consultant's shared properties.
-    if (filters.consultant) {
-      result = result.filter(
-        (p) => String(p.consultantId ?? p.consultant ?? "") === filters.consultant
-      );
-    }
-
-    // Property type ref
-    if (propertyTypeRef) {
-      result = result.filter((p) =>
-        String((p as any).propertyTypeRefId ?? (p as any).propertyTypeRef ?? "") === String(propertyTypeRef)
-      );
-    }
-
-    // City
-    if (filters.city) {
-      result = result.filter((p) => (p as any).cityName === filters.city);
-    }
-
-    // District
-    if (filters.district) {
-      result = result.filter((p) => (p.district || p.neighborhood || "") === filters.district);
-    }
-
-    // Property status
-    if (filters.propertyStatus) {
-      result = result.filter((p) => (p.propertyStatus || "").toUpperCase() === filters.propertyStatus);
-    }
-
-    return result;
-  }, [source, search, filters, propertyTypeRef]);
-
-  const totalCount = filtered.length;
-  const paginated = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const paginated = source;
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [consultantId, search, filters]);
+  }, [consultantId, filters]);
 
   const setFilter = (k: string, v: string) => {
     setFilters((p) => ({ ...p, [k]: v }));
@@ -221,8 +186,6 @@ function PropertiesListView({
     : `${totalCount.toLocaleString("fa-IR")} ملک در سیستم`;
   const tableColumns = isMine ? 9 : 7;
 
-  // On the "همه املاک" tab a consultant may view any record, but may only
-  // edit/archive the ones they own (or shared ones) — mirroring the backend.
   const canManage = (p: Property) =>
     isMine ||
     (p as any).isShared === true ||
@@ -251,13 +214,15 @@ function PropertiesListView({
         }
       />
 
-      {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="relative flex-1 min-w-48 max-w-72">
           <Search size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setCurrentPage(1);
+            }}
             placeholder="جستجوی عنوان، کد یا محله…"
             className="w-full pl-10 pr-3 py-2 text-sm rounded-xl border border-border bg-white outline-none focus:ring-2 focus:ring-ring"
           />
@@ -347,7 +312,13 @@ function PropertiesListView({
         </Card>
       )}
 
-      {source.length === 0 ? (
+      {serverLoading && source.length === 0 ? (
+        <div className="space-y-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-12 bg-muted rounded-xl animate-pulse" />
+          ))}
+        </div>
+      ) : source.length === 0 ? (
         <EmptyState
           icon={<Building2 size={28} />}
           title="ملکی وجود ندارد"
@@ -369,7 +340,9 @@ function PropertiesListView({
                 ملکی با فیلترهای فعلی پیدا نشد.
               </div>
             ) : (
-              paginated.map((p) => (
+              paginated.map((p) => {
+                const cover = p.imageUrl || p.images?.[0]?.url;
+                return (
                 <Card
                   key={p.id}
                   hover
@@ -377,8 +350,8 @@ function PropertiesListView({
                   className="overflow-hidden"
                 >
                   <div
-                    className={cx("h-32 relative flex items-end p-4", !p.images?.length && (p.gradient || "from-emerald-500 to-teal-600"))}
-                    style={p.images?.length ? { backgroundImage: `url(${p.images[0].url})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+                    className={cx("h-32 relative flex items-end p-4", !cover && (p.gradient || "from-emerald-500 to-teal-600"))}
+                    style={cover ? { backgroundImage: `url(${cover})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
                   >
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
                     <div
@@ -431,7 +404,8 @@ function PropertiesListView({
                     </div>
                   </div>
                 </Card>
-              ))
+                );
+              })
             )}
           </div>
           {paginated.length > 0 && (
@@ -564,8 +538,13 @@ function PropertiesListView({
         title="بایگانی ملک؟"
         message="این ملک بایگانی خواهد شد. مشاوران فقط املاکی را که خودشان ایجاد کرده‌اند می‌توانند بایگانی کنند."
         onConfirm={() => {
-          if (confirmArchive) onArchive(confirmArchive);
-          setConfirmArchive(null);
+          if (confirmArchive) {
+            const id = confirmArchive;
+            setConfirmArchive(null);
+            void Promise.resolve(onArchive(id)).then(() => fetchServerProperties());
+          } else {
+            setConfirmArchive(null);
+          }
         }}
         onCancel={() => setConfirmArchive(null)}
       />
@@ -573,12 +552,10 @@ function PropertiesListView({
   );
 }
 
-/** The current consultant's own (+ shared) properties, with owner contact. */
 function MyPropertiesPage(props: React.ComponentProps<typeof PropertiesListView>) {
   return <PropertiesListView {...props} variant="mine" />;
 }
 
-/** Every property registered in the system; owner contact is intentionally hidden. */
 function AllPropertiesPage(props: React.ComponentProps<typeof PropertiesListView>) {
   return <PropertiesListView {...props} variant="all" />;
 }

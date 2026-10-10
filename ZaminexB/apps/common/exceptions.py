@@ -37,8 +37,6 @@ _PATTERN_TRANSLATIONS = [
     (re.compile(r"^Ensure this value is less than or equal to (?P<value>.+)\.$"), lambda m: f"این مقدار باید کوچک‌تر یا مساوی {m.group('value')} باشد."),
     (re.compile(r"^Ensure this field has no more than (?P<value>\d+) characters\.$"), lambda m: f"طول این فیلد نباید بیشتر از {m.group('value')} کاراکتر باشد."),
     (re.compile(r"^Ensure this field has at least (?P<value>\d+) characters\.$"), lambda m: f"طول این فیلد باید حداقل {m.group('value')} کاراکتر باشد."),
-    # DecimalField validation (e.g. latitude/longitude, prices). The stock
-    # messages are cryptic; rewrite them so the user understands the limit.
     (re.compile(r"^Ensure that there are no more than (?P<value>\d+) digits in total\.$"), lambda m: f"این عدد نباید در مجموع بیشتر از {m.group('value')} رقم داشته باشد."),
     (re.compile(r"^Ensure that there are no more than (?P<value>\d+) decimal places\.$"), lambda m: f"این عدد نباید بیشتر از {m.group('value')} رقم اعشار داشته باشد."),
     (re.compile(r"^Ensure that there are no more than (?P<value>\d+) digits before the decimal point\.$"), lambda m: f"این عدد نباید بیشتر از {m.group('value')} رقم صحیح (قبل از ممیز) داشته باشد."),
@@ -65,22 +63,7 @@ def _translate_message(value):
     return text
 
 
-# Machine-readable codes the SPA switches on. Everything the API returns is
-# translated to Persian for the user, which makes `detail` unusable as a
-# signal: "your session ended" and "you may not do this" are both a 403 with a
-# Persian sentence, and matching on that sentence would break the moment the
-# wording is improved.
-#
-# DRF already assigns every APIException a stable `code` (`not_authenticated`,
-# `permission_denied`, `throttled`, …); it simply does not put it in the body.
-# Surfacing it alongside `detail` gives the frontend an exact, translation-proof
-# discriminator so it can send an expired session back to the login page while
-# showing a plain error for a genuine permission denial.
-#
-# This is purely additive — `detail` keeps its shape and wording, so every
-# existing reader is unaffected.
 CSRF_FAILED_CODE = "csrf_failed"
-
 
 def _detail_code(exc, response):
     """The stable code for this error, or None when there isn't a useful one."""
@@ -88,17 +71,10 @@ def _detail_code(exc, response):
     if code is None:
         code = getattr(exc, "default_code", None)
     if not isinstance(code, str) or not code:
-        # Django's own Http404 / PermissionDenied carry no DRF code, but the
-        # handler has already mapped them onto a status. Derive the code from
-        # that so a missing record is still reported consistently.
         return {404: "not_found", 403: "permission_denied"}.get(
             getattr(response, "status_code", None)
         )
 
-    # DRF raises a plain PermissionDenied for a failed CSRF check, which is
-    # indistinguishable from a role denial by code alone. The original English
-    # detail is the only marker, so it is mapped to a dedicated code before the
-    # message is translated.
     if code == "permission_denied":
         raw = force_str(getattr(exc, "detail", "") or "")
         if raw.startswith("CSRF Failed"):
@@ -115,9 +91,6 @@ def persian_exception_handler(exc, context):
     code = _detail_code(exc, response)
     response.data = _translate_message(response.data)
 
-    # Only annotate the `{"detail": ...}` envelope. Field-error payloads are
-    # keyed by field name and adding a `code` key there could collide with a
-    # real model field.
     if code and isinstance(response.data, dict) and "detail" in response.data:
         response.data.setdefault("code", code)
 

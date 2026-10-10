@@ -6,24 +6,24 @@ from apps.common.attribute_values import BaseAttributeValue
 
 class Listing(models.Model):
     class Status(models.TextChoices):
-        DRAFT = "DRAFT", "Draft"
-        ACTIVE = "ACTIVE", "Active"
-        PAUSED = "PAUSED", "Paused"
-        SOLD = "SOLD", "Sold"
-        EXPIRED = "EXPIRED", "Expired"
-        ARCHIVED = "ARCHIVED", "Archived"
+        DRAFT = "DRAFT", "پیش‌نویس"
+        ACTIVE = "ACTIVE", "منتشرشده (فعال)"
+        PAUSED = "PAUSED", "متوقف‌شده"
+        SOLD = "SOLD", "فروخته‌شده"
+        EXPIRED = "EXPIRED", "منقضی‌شده"
+        ARCHIVED = "ARCHIVED", "بایگانی‌شده"
 
     class PublishChannel(models.TextChoices):
-        WEBSITE = "WEBSITE", "Website"
-        INSTAGRAM = "INSTAGRAM", "Instagram"
-        TELEGRAM = "TELEGRAM", "Telegram"
-        OTHER = "OTHER", "Other"
+        WEBSITE = "WEBSITE", "وب‌سایت"
+        INSTAGRAM = "INSTAGRAM", "اینستاگرام"
+        TELEGRAM = "TELEGRAM", "تلگرام"
+        OTHER = "OTHER", "سایر"
 
     class Priority(models.IntegerChoices):
-        LOW = 1, "Low"
-        NORMAL = 2, "Normal"
-        HIGH = 3, "High"
-        URGENT = 4, "Urgent"
+        LOW = 1, "اولویت کم"
+        NORMAL = 2, "اولویت عادی"
+        HIGH = 3, "اولویت بالا"
+        URGENT = 4, "اولویت فوری"
 
     property = models.ForeignKey(
         "properties.Property",
@@ -32,12 +32,6 @@ class Listing(models.Model):
         verbose_name="ملک",
     )
 
-    # --- reference data (phase 2) ------------------------------------------
-    # Deal type belongs to the listing, not the property: the same property can
-    # be advertised for sale and for rent simultaneously. Nullable during the
-    # transition; backfilled from Property.deal_type by
-    # `link_properties_to_basics`, and made mandatory in phase 4 when pricing
-    # moves onto the listing.
     deal_type = models.ForeignKey(
         "basics.DealType",
         on_delete=models.PROTECT,
@@ -90,14 +84,6 @@ class Listing(models.Model):
 
     is_featured = models.BooleanField(default=False, verbose_name="آگهی ویژه")
 
-    # --- pricing (phase 3) --------------------------------------------------
-    # Money lives on the listing, not the property: the same property can be
-    # advertised for sale and for rent at the same time, at different prices.
-    #
-    # These are real indexed columns rather than EAV rows because price is the
-    # single most common search filter — a range query has to stay fast. Which
-    # of them a given deal type uses is configured through DealTypeAttribute,
-    # so "مبلغ رهن" only appears for رهن و اجاره.
     sale_price = models.DecimalField(
         max_digits=18,
         decimal_places=0,
@@ -122,8 +108,7 @@ class Listing(models.Model):
         db_index=True,
         verbose_name="اجاره ماهانه",
     )
-    # Open-ended pricing detail (instalment plans, staged presale payments …)
-    # mirroring `price_details JSONB` in the client's schema.
+    
     price_details = models.JSONField(
         default=dict, blank=True, verbose_name="جزئیات قیمت"
     )
@@ -141,12 +126,6 @@ class Listing(models.Model):
 
 
 class ListingAttributeValue(BaseAttributeValue):
-    """A dynamic attribute value for one listing.
-
-    Holds the commercial terms that vary per deal type — deposit, monthly rent,
-    presale instalments — for everything that is not a core indexed column.
-    """
-
     listing = models.ForeignKey(
         "listings.Listing",
         on_delete=models.CASCADE,

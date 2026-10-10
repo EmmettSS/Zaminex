@@ -1,34 +1,3 @@
-"""Reference data ("اطلاعات پایه") and the dynamic attribute engine.
-
-Why this app exists
--------------------
-Property usage, property type and deal type used to be hard-coded
-``TextChoices`` in Python. Adding "سوئیت" or "پیش‌فروش" meant editing code and
-redeploying. They are now database rows an administrator maintains from the UI.
-
-On top of that sits the attribute engine the client asked for:
-
-    Attribute                     e.g. "تعداد اتاق" (integer), "پارکینگ" (boolean)
-      ↓ linked to
-    PropertyType / DealType       via PropertyTypeAttribute / DealTypeAttribute
-      ↓ produces
-    a dynamic form                only the attributes that apply are shown
-      ↓ stored in
-    PropertyAttributeValue        (see apps/properties/models.py)
-    ListingAttributeValue         (see apps/listings/models.py)
-
-So "تعداد اتاق" can be attached to آپارتمان but not to زمین, exactly as the
-client described.
-
-Core vs. dynamic attributes
----------------------------
-An attribute may be marked ``is_core``. Core attributes are *not* stored in the
-EAV tables — they map to a real, indexed column on Property or Listing
-(``area``, ``sale_price``, ``deposit`` ...). This is the hybrid model the client
-asked for: fields that drive search stay fast columns, everything else is
-flexible EAV. ``core_field`` records which column an attribute maps to.
-"""
-
 from __future__ import annotations
 
 from django.core.exceptions import ValidationError
@@ -36,14 +5,11 @@ from django.db import models
 
 from apps.common.base_models import ReferenceDataModel, SoftDeleteModel
 
+from .categorization import ESSENTIAL as ESSENTIAL_CATEGORY
+from .categorization import NON_ESSENTIAL as NON_ESSENTIAL_CATEGORY
+
 
 class PropertyUsage(ReferenceDataModel):
-    """How a property is used: مسکونی / تجاری / اداری.
-
-    The broadest classification. Every PropertyType belongs to exactly one
-    usage, so the "افزودن ملک" form can cascade usage → type.
-    """
-
     class Meta(ReferenceDataModel.Meta):
         abstract = False
         db_table = "basics_property_usage"
@@ -54,12 +20,6 @@ class PropertyUsage(ReferenceDataModel):
 
 
 class PropertyType(ReferenceDataModel):
-    """A concrete kind of property: آپارتمان، ویلا، مغازه، زمین …
-
-    ``slug`` mirrors the client's schema and is reserved for public URLs; it is
-    optional and unused by the CRM today.
-    """
-
     property_usage = models.ForeignKey(
         PropertyUsage,
         on_delete=models.PROTECT,
@@ -92,12 +52,6 @@ class PropertyType(ReferenceDataModel):
 
 
 class DealType(ReferenceDataModel):
-    """A kind of transaction: فروش، رهن و اجاره، پیش‌فروش …
-
-    Deal type lives on the *listing*, never on the property: one property can be
-    advertised for sale and for rent at the same time.
-    """
-
     attributes = models.ManyToManyField(
         "basics.Attribute",
         through="basics.DealTypeAttribute",
@@ -114,9 +68,24 @@ class DealType(ReferenceDataModel):
         ordering = ["sort_order", "display_name"]
 
 
-class Attribute(ReferenceDataModel):
-    """A custom field an administrator defines once and reuses everywhere."""
+class AttributeCategory(ReferenceDataModel):
+    class Meta(ReferenceDataModel.Meta):
+        abstract = False
+        db_table = "basics_attribute_category"
+        constraints = [ReferenceDataModel.alive_name_unique("attribute_category")]
+        verbose_name = "دسته‌بندی ویژگی"
+        verbose_name_plural = "دسته‌بندی‌های ویژگی"
+        ordering = ["sort_order", "display_name"]
 
+    @property
+    def is_system_category(self) -> bool:
+        return self.name in (ESSENTIAL_CATEGORY, NON_ESSENTIAL_CATEGORY)
+
+    def attribute_count(self) -> int:
+        return Attribute.objects.filter(category=self.name).count()
+
+
+class Attribute(ReferenceDataModel):
     class DataType(models.TextChoices):
         TEXT = "text", "متن"
         INTEGER = "integer", "عدد صحیح"
@@ -138,15 +107,12 @@ class Attribute(ReferenceDataModel):
         EXISTS = "exists", "وجود دارد"
 
     class Entity(models.TextChoices):
-        """Which side of the model an attribute describes.
-
-        Physical facts about the building belong to the property; commercial
-        terms belong to the listing. Keeping them apart stops "مبلغ رهن" from
-        being offered on the property form.
-        """
-
         PROPERTY = "property", "ملک"
         LISTING = "listing", "آگهی"
+
+    class Category(models.TextChoices):
+        ESSENTIAL = ESSENTIAL_CATEGORY, "ویژگی ضروری"
+        NON_ESSENTIAL = NON_ESSENTIAL_CATEGORY, "ویژگی غیر ضروری"
 
     data_type = models.CharField(
         max_length=20,
@@ -179,13 +145,24 @@ class Attribute(ReferenceDataModel):
         verbose_name="واحد",
         help_text="مثلاً متر مربع، تومان، عدد.",
     )
+    
+    category = models.CharField(
+        max_length=100,
+        default=Category.NON_ESSENTIAL,
+        db_index=True,
+        verbose_name="دسته‌بندی ویژگی",
+        help_text=(
+            "دسته‌بندی‌ای که این ویژگی در آن قرار می‌گیرد؛ فهرست دسته‌بندی‌ها از "
+            "تب «دسته‌بندی ویژگی‌ها» مدیریت می‌شود. یک ویژگی همیشه دقیقاً در یک "
+            "دسته‌بندی قرار دارد."
+        ),
+    )
     is_facility = models.BooleanField(
         default=False,
         verbose_name="امکانات رفاهی",
         help_text="ویژگی‌های بله/خیر مانند آسانسور و پارکینگ که به صورت گروهی نمایش داده می‌شوند.",
     )
 
-    # --- hybrid storage -----------------------------------------------------
     is_core = models.BooleanField(
         default=False,
         verbose_name="فیلد ثابت",
@@ -228,8 +205,6 @@ class Attribute(ReferenceDataModel):
                 {"core_field": "نام ستون ثابت فقط برای ویژگی‌های ثابت معنا دارد."}
             )
         if self.data_type in {self.DataType.SELECT, self.DataType.MULTISELECT}:
-            # Options are validated on save of the related rows; a select with
-            # no options would render an empty dropdown.
             if self.pk and not self.options.exists():
                 raise ValidationError(
                     {"data_type": "برای ویژگی انتخابی باید حداقل یک گزینه تعریف شود."}
@@ -237,7 +212,6 @@ class Attribute(ReferenceDataModel):
 
     @property
     def value_field(self) -> str:
-        """Which column of the EAV value table holds this attribute's data."""
         return {
             self.DataType.TEXT: "value_text",
             self.DataType.INTEGER: "value_integer",
@@ -250,13 +224,6 @@ class Attribute(ReferenceDataModel):
 
 
 class AttributeOption(SoftDeleteModel):
-    """A choice for a ``select`` / ``multiselect`` attribute.
-
-    The client's schema stores these inside ``meta_data``. A real table is used
-    instead so options can be reordered, deactivated and referenced by a stable
-    key, and so a typo in one row cannot corrupt the whole option list.
-    """
-
     attribute = models.ForeignKey(
         Attribute,
         on_delete=models.CASCADE,
@@ -291,8 +258,6 @@ class AttributeOption(SoftDeleteModel):
 
 
 class AttributeLink(models.Model):
-    """Shared columns for the four attribute-binding tables."""
-
     attribute = models.ForeignKey(
         Attribute,
         on_delete=models.CASCADE,
@@ -308,8 +273,6 @@ class AttributeLink(models.Model):
 
 
 class PropertyTypeAttribute(AttributeLink):
-    """Which attributes appear on the "افزودن ملک" form for a property type."""
-
     property_type = models.ForeignKey(
         PropertyType,
         on_delete=models.CASCADE,
@@ -343,8 +306,6 @@ class PropertyTypeAttribute(AttributeLink):
 
 
 class DealTypeAttribute(AttributeLink):
-    """Which attributes appear on the "ساخت آگهی" form for a deal type."""
-
     deal_type = models.ForeignKey(
         DealType,
         on_delete=models.CASCADE,
@@ -378,14 +339,6 @@ class DealTypeAttribute(AttributeLink):
 
 
 class PropertyTypeSearchAttribute(AttributeLink):
-    """Which attributes appear as *search filters* for a property type.
-
-    Separate from :class:`PropertyTypeAttribute` because the data an agent
-    records is not the same set they filter by: "توضیحات مالک" is worth storing
-    but useless as a filter, while "متراژ" is a core column that belongs in the
-    filter bar without being a dynamic form field.
-    """
-
     property_type = models.ForeignKey(
         PropertyType,
         on_delete=models.CASCADE,
@@ -411,8 +364,6 @@ class PropertyTypeSearchAttribute(AttributeLink):
 
 
 class DealTypeSearchAttribute(AttributeLink):
-    """Which attributes appear as *search filters* for a deal type."""
-
     deal_type = models.ForeignKey(
         DealType,
         on_delete=models.CASCADE,
@@ -437,23 +388,7 @@ class DealTypeSearchAttribute(AttributeLink):
         return f"{self.deal_type.display_name} ⌕ {self.attribute.display_name}"
 
 
-# ---------------------------------------------------------------------------
-#  Geography: Province → City → District
-# ---------------------------------------------------------------------------
-#
-# Replaces the old flat `common.District` table (a single free-text name) with
-# the three-level hierarchy the client's schema describes. Every level is
-# administrator-managed: no province, city or district is seeded, because the
-# agency knows its own coverage area and a shipped list would be wrong for them.
-#
-# `Property.district` becomes a foreign key here, so a neighbourhood can be
-# renamed once and every property follows, and so filtering by city no longer
-# depends on matching free text.
-
-
 class Province(ReferenceDataModel):
-    """A province (استان)."""
-
     slug = models.SlugField(
         max_length=255,
         unique=True,
@@ -473,8 +408,6 @@ class Province(ReferenceDataModel):
 
 
 class City(ReferenceDataModel):
-    """A city (شهر), belonging to exactly one province."""
-
     province = models.ForeignKey(
         Province,
         on_delete=models.PROTECT,
@@ -493,8 +426,6 @@ class City(ReferenceDataModel):
     class Meta(ReferenceDataModel.Meta):
         abstract = False
         db_table = "basics_city"
-        # `name` is only unique within its province: two provinces may each
-        # have a "مرکزی" without clashing.
         constraints = [
             models.UniqueConstraint(
                 fields=["province", "name"],
@@ -509,8 +440,6 @@ class City(ReferenceDataModel):
 
 
 class District(ReferenceDataModel):
-    """A neighbourhood (محله), belonging to exactly one city."""
-
     city = models.ForeignKey(
         City,
         on_delete=models.PROTECT,
@@ -543,5 +472,4 @@ class District(ReferenceDataModel):
 
     @property
     def full_path(self) -> str:
-        """"استان / شهر / محله" — used wherever the district is shown alone."""
         return f"{self.city.province.display_name} / {self.city.display_name} / {self.display_name}"

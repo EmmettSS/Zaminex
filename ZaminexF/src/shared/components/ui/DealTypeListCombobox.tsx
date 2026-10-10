@@ -26,7 +26,6 @@ function DealTypeListCombobox({
 
   const selected = options.find((o) => String(o.id) === String(value));
 
-  // Map "رهن و اجاره" to "اجاره" for display as requested
   const getDisplayLabel = (opt: DealTypeOption) => {
     if (opt.displayName === "رهن و اجاره") return "اجاره";
     return opt.displayName;

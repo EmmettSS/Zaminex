@@ -55,13 +55,6 @@ class LoginAttemptAdmin(admin.ModelAdmin):
 
 
 class SmsProviderSettingsForm(forms.ModelForm):
-    """Never echo the stored secrets back into the admin form.
-
-    The API keys are encrypted at rest; showing the ciphertext in the field is
-    both confusing and pointless. The fields therefore render empty and are
-    only overwritten when a new value is typed.
-    """
-
     class Meta:
         model = SmsProviderSettings
         fields = "__all__"
@@ -79,7 +72,6 @@ class SmsProviderSettingsForm(forms.ModelForm):
     def clean(self):
         cleaned = super().clean()
         if self.instance and self.instance.pk:
-            # Empty means "keep the existing key" rather than "delete it".
             for field in ("smsir_api_key", "kavenegar_api_key"):
                 if not cleaned.get(field):
                     cleaned[field] = getattr(self.instance, field)
@@ -144,4 +136,11 @@ class SmsLoginCodeAdmin(admin.ModelAdmin):
     list_display = ("mobile", "created_at", "expires_at", "attempts", "consumed_at")
     search_fields = ("mobile",)
     list_filter = ("consumed_at",)
-    readonly_fields = ("mobile", "code_hash", "created_at", "expires_at", "attempts", "consumed_at")
+    readonly_fields = (
+        "mobile",
+        "code_hash",
+        "created_at",
+        "expires_at",
+        "attempts",
+        "consumed_at",
+    )

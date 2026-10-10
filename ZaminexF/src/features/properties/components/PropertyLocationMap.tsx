@@ -29,7 +29,6 @@ function isValidCoord(n: number) {
   return Number.isFinite(n);
 }
 
-/** Read-only map of a saved property pin. Zoom only — no click-to-place. */
 function PropertyLocationMap({ latitude, longitude }: { latitude: number; longitude: number }) {
   const lat = Number(latitude);
   const lng = Number(longitude);

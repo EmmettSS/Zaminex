@@ -1,21 +1,7 @@
-# Generated manually: backfills the new owner-contact columns for properties
-# that existed before the fields were added.
-#
-# No real owner contact was stored for those records, so the only reliable
-# source available is the consultant each property is assigned to. We mirror
-# their profile (full name split into first/last name, mobile) into the new
-# fields so every pre-existing row is complete under the new structure. New
-# records continue to be created with the real owner info from the wizard.
 from django.db import migrations
 
 
 def _split_full_name(full_name):
-    """Split a full name like 'احسان محمدی' into (first, last).
-
-    Persian names are space-separated; the first token is the given name and
-    everything after it the surname. A single-token name is treated as the
-    given name only.
-    """
     parts = (full_name or "").split()
     if not parts:
         return "", ""
@@ -37,8 +23,6 @@ def backfill_owner_info(apps, schema_editor):
         if consultant is None:
             continue
 
-        # The consultant's contact lives on their ConsultantProfile; the User
-        # row itself carries no full name or mobile.
         profile = getattr(consultant, "consultant_profile", None)
         first, last = _split_full_name(
             getattr(profile, "full_name", None) or ""
@@ -62,8 +46,6 @@ def backfill_owner_info(apps, schema_editor):
 
 
 def noop_reverse(apps, schema_editor):
-    # Deliberately irreversible: once the placeholder owner info is written
-    # there is no meaningful original value to restore.
     pass
 
 

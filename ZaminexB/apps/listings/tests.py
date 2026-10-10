@@ -4,11 +4,13 @@ from decimal import Decimal
 import jdatetime
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.common.analytics_views import _get_monthly_revenue, PERSIAN_MONTHS
+from apps.analytics.views import _get_monthly_revenue, PERSIAN_MONTHS
 from apps.listings.models import Listing
 from apps.properties.models import Property
 
@@ -57,8 +59,6 @@ class ListingSoldAndRevenueTests(TestCase):
         self.assertEqual(self.listing_sale.property.status, Property.Status.SOLD)
 
     def test_set_status_to_sold_updates_related_property(self):
-        # Setting a listing to SOLD via the generic set_status action must also
-        # flip the linked property to SOLD, so the property mirrors the listing.
         resp = self.client.post(
             f"/listings/api/listings/{self.listing_sale.id}/set_status/",
             {"status": "SOLD"},
@@ -70,7 +70,6 @@ class ListingSoldAndRevenueTests(TestCase):
         self.assertEqual(self.listing_sale.property.status, Property.Status.SOLD)
 
     def test_set_status_consultant_owner_can_change_status(self):
-        # The consultant who created the listing may change its status too.
         client = APIClient()
         client.force_authenticate(user=self.agent)
         resp = client.post(
@@ -94,11 +93,9 @@ class ListingSoldAndRevenueTests(TestCase):
 
 
     def test_show_sold_filtering(self):
-        # Mark listing_sale as sold
         self.listing_sale.status = Listing.Status.SOLD
         self.listing_sale.save()
 
-        # By default (without show_sold), SOLD listings should be hidden
         res_default = self.client.get("/listings/api/listings/")
         self.assertEqual(res_default.status_code, 200)
         results = res_default.json()["results"]
@@ -106,7 +103,6 @@ class ListingSoldAndRevenueTests(TestCase):
         self.assertNotIn(self.listing_sale.id, ids)
         self.assertIn(self.listing_rent.id, ids)
 
-        # With show_sold=true, ONLY SOLD listings should be shown
         res_sold = self.client.get("/listings/api/listings/?show_sold=true")
         self.assertEqual(res_sold.status_code, 200)
         sold_results = res_sold.json()["results"]
@@ -115,7 +111,6 @@ class ListingSoldAndRevenueTests(TestCase):
         self.assertNotIn(self.listing_rent.id, sold_ids)
 
     def test_archived_listing_stays_in_default_list(self):
-        """Archiving must not hide the listing from the default list."""
         self.listing_sale.status = Listing.Status.ARCHIVED
         self.listing_sale.save()
 
@@ -179,7 +174,6 @@ class ListingSoldAndRevenueTests(TestCase):
         self.assertFalse(Listing.objects.filter(pk=listing_id).exists())
 
     def test_property_filter_returns_all_pages_for_that_property(self):
-        """`?property=` must hit the DB filter, not rely on the first page of 20."""
         other = Property.objects.create(
             title="ملک دیگر",
             internal_code="P-OTHER",
@@ -211,7 +205,6 @@ class ListingSoldAndRevenueTests(TestCase):
             self.assertNotIn(extra.id, ids)
 
     def test_property_filter_include_sold(self):
-        """Property-scoped tab must be able to include SOLD listings."""
         self.listing_sale.status = Listing.Status.SOLD
         self.listing_sale.save()
 
@@ -232,7 +225,6 @@ class ListingSoldAndRevenueTests(TestCase):
         self.assertEqual(shown_payload["count"], 2)
 
     def test_sold_listing_detail_is_reachable(self):
-        """The list hides sold rows by default; the detail page must still load."""
         self.listing_sale.status = Listing.Status.SOLD
         self.listing_sale.save()
 
@@ -248,7 +240,6 @@ class ListingSoldAndRevenueTests(TestCase):
         self.assertEqual(res_agent.json()["status"], "SOLD")
 
     def test_monthly_revenue_calculation_includes_sale_and_rent(self):
-        # Mark both as sold
         self.listing_sale.status = Listing.Status.SOLD
         self.listing_sale.save()
 
@@ -262,7 +253,6 @@ class ListingSoldAndRevenueTests(TestCase):
         self.assertGreater(total_rev, 0)
 
     def test_revenue_chart_reflects_listing_reopened_to_active(self):
-        """Reopening a SOLD listing must remove it from the sales chart."""
         self.listing_sale.status = Listing.Status.SOLD
         self.listing_sale.save()
 
@@ -270,7 +260,6 @@ class ListingSoldAndRevenueTests(TestCase):
         self.assertEqual(sum(m["count"] for m in before), 1)
         self.assertGreater(sum(m["revenue"] for m in before), 0)
 
-        # User changes the listing back to ACTIVE
         resp = self.client.post(
             f"/listings/api/listings/{self.listing_sale.id}/set_status/",
             {"status": "ACTIVE"},
@@ -286,8 +275,6 @@ class ListingSoldAndRevenueTests(TestCase):
         self.assertNotEqual(self.property.status, Property.Status.SOLD)
 
     def test_revenue_chart_keeps_sold_property_when_other_listing_still_sold(self):
-        """If two listings are SOLD and one is reopened, the property remains
-        sold because another listing is still closed."""
         other = Listing.objects.create(
             property=self.property,
             title="فروش دیگر",
@@ -307,16 +294,11 @@ class ListingSoldAndRevenueTests(TestCase):
         self.assertEqual(resp.status_code, 200)
 
         after = _get_monthly_revenue()["months"]
-        # The first sale listing is still SOLD and should remain.
+        
         self.assertEqual(sum(m["count"] for m in after), 1)
 
 
 class MonthlyRevenueJalaliTests(TestCase):
-    """The revenue chart must follow the real Jalali (Shamsi) calendar:
-    the current Persian month plus the five months before it, ordered
-    oldest → newest (so the current month renders at the right in RTL).
-    """
-
     @classmethod
     def setUpTestData(cls):
         cls.agent = User.objects.create_user(
@@ -325,10 +307,6 @@ class MonthlyRevenueJalaliTests(TestCase):
 
     @staticmethod
     def _force_updated(obj, jalali_ym):
-        """Move an object's updated_at into a specific Jalali month.
-
-        Uses queryset .update() to bypass the auto_now on save().
-        """
         y, m = jalali_ym
         g = jdatetime.date(year=y, month=m, day=15).togregorian()
         dt = datetime.datetime.combine(
@@ -349,7 +327,7 @@ class MonthlyRevenueJalaliTests(TestCase):
 
     def test_returns_exactly_six_months_with_current_jalali_month_last(self):
         jtoday = jdatetime.date.today()
-        lst = self._sold_listing("R1", 1000000000)  # 1 billion
+        lst = self._sold_listing("R1", 1000000000)
         self._force_updated(lst, (jtoday.year, jtoday.month))
 
         data = _get_monthly_revenue()["months"]
@@ -365,7 +343,6 @@ class MonthlyRevenueJalaliTests(TestCase):
             expected.append(PERSIAN_MONTHS[m - 1])
 
         self.assertEqual([d["month"] for d in data], expected)
-        # current Jalali month is the last (right-most) bucket in RTL
         self.assertEqual(data[-1]["month"], PERSIAN_MONTHS[jtoday.month - 1])
         self.assertEqual(data[-1]["count"], 1)
 
@@ -400,9 +377,6 @@ class MonthlyRevenueJalaliTests(TestCase):
         self.assertEqual(data[0]["count"], 1)
 
     def test_count_and_revenue_include_sale_rent_mortgage(self):
-        """The 'last 3 months' cards must count every property type priced in
-        the chart: sale (sale_price), rent (deposit + monthly_rent*30) and
-        rahn/mortgage (deposit). Volumes are grouped by deal type."""
         from apps.basics.models import DealType
 
         jtoday = jdatetime.date.today()
@@ -420,7 +394,6 @@ class MonthlyRevenueJalaliTests(TestCase):
             defaults={"display_name": "رهن کامل", "sort_order": 3},
         )
 
-        # Sale
         p1 = Property.objects.create(
             title="ملک فروش", internal_code="C1", consultant=self.agent,
             area=100, address="تهران", status=Property.Status.SOLD,
@@ -432,7 +405,6 @@ class MonthlyRevenueJalaliTests(TestCase):
         )
         self._force_updated(l1, (jtoday.year, jtoday.month))
 
-        # Rent (deposit + monthly_rent*30)
         p2 = Property.objects.create(
             title="ملک اجاره", internal_code="C2", consultant=self.agent,
             area=100, address="تهران", status=Property.Status.SOLD,
@@ -445,7 +417,6 @@ class MonthlyRevenueJalaliTests(TestCase):
         )
         self._force_updated(l2, (jtoday.year, jtoday.month))
 
-        # Rahn / mortgage (deposit only)
         p3 = Property.objects.create(
             title="ملک رهن", internal_code="C3", consultant=self.agent,
             area=100, address="تهران", status=Property.Status.SOLD,
@@ -460,12 +431,10 @@ class MonthlyRevenueJalaliTests(TestCase):
         bundle = _get_monthly_revenue()
         data = bundle["months"]
         cur = data[-1]
-        # 3 deals counted in the current month
+        
         self.assertEqual(cur["count"], 3)
-        # rent => 500M + (10M×30) = 800M; sale => 3000M; rahn => 2000M = 5.8B total
         self.assertEqual(cur["total"], 5800000000)
 
-        # Per-deal-type breakdown must be present and add up to the total.
         deal_names = {dt["name"] for dt in bundle["dealTypes"]}
         self.assertIn("sale", deal_names)
         self.assertIn("mortgage_rent", deal_names)
@@ -474,3 +443,220 @@ class MonthlyRevenueJalaliTests(TestCase):
         self.assertAlmostEqual(volumes["sale"], 3.0)
         self.assertAlmostEqual(volumes["mortgage_rent"], 0.8)
         self.assertAlmostEqual(volumes["full_mortgage"], 2.0)
+
+
+class ListingListSerializerShapeTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="lls-admin", password="pw", role="ADMIN"
+        )
+        self.agent = User.objects.create_user(
+            username="lls-agent", password="pw", role="AGENT"
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+
+        self.property = Property.objects.create(
+            title="آپارتمان بنچمارک",
+            internal_code="ZF_4001",
+            consultant=self.agent,
+            area=120,
+            address="تهران نیاوران",
+            description="توضیحات ملک تست",
+        )
+        self.listing = Listing.objects.create(
+            property=self.property,
+            title="فروش آپارتمان بنچمارک",
+            description="توضیحات آگهی تست",
+            publish_channel="WEBSITE",
+            created_by=self.agent,
+            assigned_to=self.agent,
+            status=Listing.Status.ACTIVE,
+            sale_price=Decimal("5000000000"),
+            start_date=timezone.now().date(),
+        )
+
+    def test_list_response_uses_the_slim_serializer(self):
+        res = self.client.get("/listings/api/listings/", {"page_size": 10})
+        self.assertEqual(res.status_code, 200)
+        row = res.json()["results"][0]
+
+        for field in (
+            "description",
+            "attributes",
+            "attributeDetails",
+            "created_by_detail",
+            "priceDetails",
+            "effectiveExposureDays",
+            "delegationIndicator",
+            "isBurnedListing",
+            "generatedHighProbLeads",
+            "contentRichnessScore",
+            "engagementHeatScore",
+        ):
+            self.assertNotIn(field, row)
+
+        for field in (
+            "id",
+            "title",
+            "status",
+            "channels",
+            "created_at",
+            "assigned_to",
+            "assigned_to_detail",
+            "property",
+            "property_detail",
+            "score",
+            "views",
+            "dealTypeDisplay",
+            "salePrice",
+            "deposit",
+            "monthlyRent",
+        ):
+            self.assertIn(field, row)
+
+    def test_detail_response_keeps_the_full_serializer(self):
+        res = self.client.get(f"/listings/api/listings/{self.listing.id}/")
+        self.assertEqual(res.status_code, 200)
+        row = res.json()
+        for field in (
+            "description",
+            "attributes",
+            "attributeDetails",
+            "created_by_detail",
+            "effectiveExposureDays",
+            "delegationIndicator",
+            "isBurnedListing",
+            "generatedHighProbLeads",
+            "contentRichnessScore",
+            "engagementHeatScore",
+        ):
+            self.assertIn(field, row)
+
+    def test_property_detail_price_comes_from_the_batched_map(self):
+        Listing.objects.create(
+            property=self.property,
+            title="فروش با قیمت بالاتر",
+            publish_channel="INSTAGRAM",
+            created_by=self.agent,
+            status=Listing.Status.ACTIVE,
+            sale_price=Decimal("7000000000"),
+            start_date=timezone.now().date(),
+        )
+        res = self.client.get("/listings/api/listings/", {"page_size": 10})
+        rows = res.json()["results"]
+        prices = {r["property_detail"]["price"] for r in rows}
+        self.assertIn("7000000000", prices)
+
+    def test_property_detail_price_falls_back_to_legacy_column(self):
+        prop = Property.objects.create(
+            title="ملک بدون آگهی فروش",
+            internal_code="ZF_4002",
+            consultant=self.agent,
+            area=80,
+            address="تهران",
+            price=Decimal("1234567890"),
+        )
+        Listing.objects.create(
+            property=prop,
+            title="اجاره ملک بدون آگهی فروش",
+            publish_channel="WEBSITE",
+            created_by=self.agent,
+            status=Listing.Status.ACTIVE,
+            monthly_rent=Decimal("10000000"),
+            start_date=timezone.now().date(),
+        )
+        res = self.client.get(
+            "/listings/api/listings/",
+            {"property": prop.id, "include_sold": "true", "page_size": 10},
+        )
+        rows = res.json()["results"]
+        self.assertEqual(rows[0]["property_detail"]["price"], "1234567890")
+
+    def test_assigned_to_detail_keeps_name_and_mobile(self):
+        res = self.client.get("/listings/api/listings/", {"page_size": 10})
+        row = res.json()["results"][0]
+        self.assertEqual(row["assigned_to_detail"]["name"], "lls-agent")
+        self.assertIn("mobile", row["assigned_to_detail"])
+
+
+class ListingListQueryCountTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="lqc-admin", password="pw", role="ADMIN"
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+
+    @staticmethod
+    def _seed(n_properties, code_base):
+        agent = User.objects.create_user(
+            username=f"lqc-agent-{code_base}", password="pw", role="AGENT"
+        )
+        for i in range(n_properties):
+            prop = Property.objects.create(
+                title=f"ملک {code_base} عدد {i}",
+                internal_code=f"ZF_{code_base}{i:02d}",
+                consultant=agent,
+                area=90,
+                address="تهران",
+                description="توضیحات " * 4,
+            )
+            for j in range(2):
+                Listing.objects.create(
+                    property=prop,
+                    title=f"آگهی {code_base}-{i}-{j}",
+                    description="توضیحات آگهی " * 3,
+                    publish_channel="WEBSITE",
+                    created_by=agent,
+                    assigned_to=agent,
+                    status=Listing.Status.ACTIVE,
+                    sale_price=Decimal(1000000000 * (1 + i % 9)),
+                    start_date=timezone.now().date(),
+                )
+
+    def _counted_get(self, page_size):
+        with CaptureQueriesContext(connection) as ctx:
+            res = self.client.get("/listings/api/listings/", {"page_size": page_size})
+        self.assertEqual(res.status_code, 200)
+        return len(ctx.captured_queries), res
+
+    def test_list_query_count_stays_flat(self):
+        self._seed(10, 50)
+        small, res = self._counted_get(200)
+        self.assertEqual(len(res.json()["results"]), 20)
+
+        self._seed(40, 60)
+        large, res = self._counted_get(200)
+        self.assertEqual(len(res.json()["results"]), 100)
+
+        self.assertLess(
+            large,
+            50,
+            "a 100-row listings list must run a small constant number of queries",
+        )
+        self.assertLessEqual(large, small + 2)
+
+    def test_zero_or_negative_prices_are_rejected(self):
+        prop = Property.objects.create(
+            title="ملک تست قیمت",
+            internal_code="ZF_PRICE_TEST",
+            consultant=self.admin,
+            area=100,
+            address="تهران",
+        )
+        for field in ("salePrice", "deposit", "monthlyRent"):
+            for bad_val in (0, -1, -5000000):
+                res = self.client.post(
+                    "/listings/api/listings/",
+                    {
+                        "property": prop.id,
+                        "title": "تست قیمت نامعتبر",
+                        "publishChannel": "WEBSITE",
+                        field: bad_val,
+                    },
+                    format="json",
+                )
+                self.assertEqual(res.status_code, 400)
+                self.assertIn(field, res.json())
+

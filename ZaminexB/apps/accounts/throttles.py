@@ -1,16 +1,16 @@
-"""Rate limits for the public SMS-login endpoints.
+from apps.common.throttles import ResilientAnonRateThrottle
 
-Both endpoints are anonymous, so they are throttled per client IP. The rates
-are deliberately tight: requesting codes is cheap for the attacker (it costs
-real SMS credit) and verifying codes is a brute-force surface.
-"""
-
-from rest_framework.throttling import AnonRateThrottle
+from .login_security import _client_ip
 
 
-class SmsRequestRateThrottle(AnonRateThrottle):
+class SmsAnonRateThrottle(ResilientAnonRateThrottle):
+    def get_ident(self, request) -> str:
+        return _client_ip(request) or "anonymous"
+
+
+class SmsRequestRateThrottle(SmsAnonRateThrottle):
     scope = "sms_request"
 
 
-class SmsVerifyRateThrottle(AnonRateThrottle):
+class SmsVerifyRateThrottle(SmsAnonRateThrottle):
     scope = "sms_verify"

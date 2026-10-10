@@ -1,15 +1,3 @@
-"""Report / analytics service layer.
-
-All heavy lifting for the Reports pages lives here so views stay thin,
-queries stay optimized, and calculations are easy to unit-test.
-
-Scoping rules (security-critical):
-- Property-level reports are ALWAYS computed from the single Property and its
-  related records (tasks, followups, listings, images). No global leakage.
-- Consultant / admin aggregate reports filter related records by the
-  consultant/owner scope and never bypass permissions of the caller.
-"""
-
 from __future__ import annotations
 
 import datetime
@@ -41,15 +29,12 @@ from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 
 from apps.accounts.models import ConsultantProfile, UserRole
+from apps.common.access import can_access_property
 from apps.followups.models import FollowUp, FollowUpStatus
 from apps.listings.models import Listing
 from apps.properties.models import Property, PropertyImage
 from apps.tasks.models import Task
 
-
-# ---------------------------------------------------------------------------
-# Generic helpers
-# ---------------------------------------------------------------------------
 
 BINS_TENURE_DAYS = [
     (0, 30, "0–30"),
@@ -107,7 +92,6 @@ def _safe_div(n: float, d: float) -> float | None:
 
 
 def _bin_histogram(values: Iterable[int | float | None], bins) -> list[dict[str, Any]]:
-    """Group numeric values into bins (min-inclusive, max-exclusive)."""
     counts = {label: 0 for _, _, label in bins}
     for v in values:
         if v is None:
@@ -128,13 +112,7 @@ def _round(value, digits=2):
         return None
 
 
-# ---------------------------------------------------------------------------
-# Access-controlled querysets
-# ---------------------------------------------------------------------------
-
-
 def accessible_properties(user) -> Any:
-    """Queryset of properties the user can access. Admin sees all, agents see theirs."""
     qs = Property.objects.select_related("consultant")
     if getattr(user, "role", None) != "ADMIN":
         qs = qs.filter(consultant=user)
@@ -142,22 +120,16 @@ def accessible_properties(user) -> Any:
 
 
 def get_property_for_user_or_403(user, property_id: int) -> Property:
-    """Return the property if the user can access it; otherwise raise PermissionError."""
     qs = Property.objects.select_related("consultant")
     qs = qs.prefetch_related("images", "tasks", "followups", "listings")
     obj = qs.filter(pk=property_id).first()
     if obj is None:
         from django.core.exceptions import PermissionDenied
         raise PermissionDenied("ملک مورد نظر وجود ندارد یا به آن دسترسی ندارید.")
-    if getattr(user, "role", None) != "ADMIN" and obj.consultant_id != user.pk:
+    if not can_access_property(user, obj):
         from django.core.exceptions import PermissionDenied
         raise PermissionDenied("شما به گزارش این ملک دسترسی ندارید.")
     return obj
-
-
-# ---------------------------------------------------------------------------
-# Single-property report
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -188,19 +160,12 @@ def _property_listings(prop: Property):
 
 
 def compute_property_report(prop: Property, *, filters: dict | None = None) -> dict[str, Any]:
-    """Compute the full scoped report for a single property.
-
-    `filters` currently honours:
-      - date_from, date_to (YYYY-MM-DD) — restricts the creation window used
-        for follow-up / task / listing based counts and charts.
-    """
     filters = filters or {}
     today = _today()
     now = timezone.now()
     date_from = filters.get("date_from")
     date_to = filters.get("date_to")
 
-    # ---- related data (scoped by property) ----------------------------------
     tasks_qs = Task.objects.filter(property=prop).exclude(
         status=Task.Status.CANCELLED
     )
@@ -231,10 +196,8 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
 
     warnings: list[str] = []
 
-    # ---- 1. Tenure_Days -----------------------------------------------------
     tenure_days = _days_between(prop.created_at) if prop.created_at else None
 
-    # ---- 2. Tasks_Overdue_Count (open overdue tasks by type) ----------------
     overdue_tasks = [
         t
         for t in tasks
@@ -269,7 +232,6 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
     if not tasks_overdue_chart:
         tasks_overdue_chart = [{"label": "بدون تأخیر", "count": 0}]
 
-    # ---- 3. Work completion (follow-ups + tasks), not self-reported odds ----
     by_type: dict[str, list[FollowUp]] = {}
     for f_ in followups:
         label = f_.get_follow_up_type_display() or f_.follow_up_type
@@ -295,10 +257,7 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
     if work_completion_rate is None:
         warnings.append("هنوز پیگیری یا وظیفه‌ای برای این ملک ثبت نشده است.")
 
-    # ---- 4. Price_Per_Sqm (map points) --------------------------------------
-    # Pricing lives on the listing now; `effective_sale_price` reads the
-    # property's sale listings and falls back to the legacy column.
-    from apps.common.metrics import effective_sale_price as _sale_price
+    from apps.analytics.metrics import effective_sale_price as _sale_price
 
     pps = None
     _price = _sale_price(prop)
@@ -319,21 +278,13 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
             "موقعیت جغرافیایی یا قیمت/متراژ برای نمایش روی نقشه ناقص است."
         )
 
-    # ---- 5. Images_Count (histogram bucket is singular for this property;
-    #         chart represents the distribution across THIS property's
-    #         galleries vs listing richness – we use a simple bar since a
-    #         single point histogram is useless. Kept as histogram-style bar.)
     images_histogram = [{"label": "تصاویر ثبت‌شده", "count": images_count}]
 
-    # ---- 6. Days_On_Market --------------------------------------------------
-    # Heuristic: earliest listing start_date; if no listing has a start_date
-    # fall back to created_at. End is latest end_date of non-active listings,
-    # otherwise today.
     listing_starts = [
         l.start_date_date for l in listings if l.start_date_date is not None
     ]
     dom_start = min(listing_starts) if listing_starts else _as_date(prop.created_at)
-    # If all listings are ACTIVE/DRAFT/PAUSED, treat as still on market.
+    
     still_active = any(
         l.status in (Listing.Status.ACTIVE, Listing.Status.DRAFT, Listing.Status.PAUSED)
         for l in listings
@@ -349,8 +300,6 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
             "روزهای حضور در بازار به‌صورت fallback از تاریخ ایجاد ملک محاسبه شد (آگهی با start_date یافت نشد)."
         )
 
-    # Single-point "histogram" is not useful, so we bucket the listing
-    # windows that contributed to the DoM calculation.
     dom_buckets = []
     if listings:
         durations = []
@@ -365,13 +314,11 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
                 durations.append(_days_between(s, e) or 0)
         dom_buckets = _bin_histogram(durations, BINS_DAYS_ON_MARKET)
 
-    # ---- 7. Spatial_Density_Ratio (rooms/area). Scatter across listings. ----
     sdr = None
     if prop.area and float(prop.area) > 0:
         sdr = round(float(prop.rooms or 0) / float(prop.area), 4)
     scatter = []
     for l in listings:
-        # x = days exposure, y = content-ish quality: priority * is_featured
         if l.start_date_date:
             eff_end = l.end_date_date if l.end_date_date else today
             eff = _days_between(l.start_date_date, eff_end)
@@ -389,14 +336,9 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
     if not scatter:
         warnings.append("تابع پراکندگی فضایی: هیچ آگهی برای این ملک ثبت نشده است.")
 
-    # ---- 8. Price_Deviation_Index -------------------------------------------
-    # Compare against comparable (same neighborhood, same deal_type). Require
-    # at least 2 comparables; otherwise fall back to all neighborhood props.
-    from apps.common.metrics import build_neighborhood_price_per_sqm_map as _build_map
+    from apps.analytics.metrics import build_neighborhood_price_per_sqm_map as _build_map
 
     neighborhood_avg: float | None = None
-    # Comparable neighbourhood properties, ALWAYS excluding the property itself
-    # so it never compares against its own price and reports a false 0%.
     comparables_qs = Property.active_objects.exclude(area=0).filter(
         neighborhood=prop.neighborhood, deal_type=prop.deal_type
     ).exclude(pk=prop.pk)
@@ -410,10 +352,6 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
             "همسایه‌های هم‌نوع" if comp_count >= 2 else "همسایه‌های هم‌نوع (۱ مورد)"
         )
     else:
-        # No comparable of the same deal type: fall back to all properties in
-        # the neighbourhood (still excluding this property). If none exist,
-        # leave the deviation as None instead of comparing against the property
-        # itself and reporting a false 0%.
         fallback_qs = Property.active_objects.exclude(area=0).filter(
             neighborhood=prop.neighborhood
         ).exclude(pk=prop.pk)
@@ -445,13 +383,13 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
             "type": "benchmark",
         },
     ]
-    # Diverging bar: positive/negative deviation
+    
     diverging = []
     if price_deviation_index is not None:
         diverging.append(
             {
                 "label": "انحراف قیمت",
-                "deviation": round(price_deviation_index * 100, 2),  # percent
+                "deviation": round(price_deviation_index * 100, 2),
             }
         )
     else:
@@ -459,8 +397,7 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
             "شاخص انحراف قیمت قابل محاسبه نیست (میانگین محله یا قیمت/متراژ در دسترس نیست)."
         )
 
-    # ---- 9. Geo_Precision_Flag ----------------------------------------------
-    from apps.common.metrics import geo_precision_flag as _geo_flag
+    from apps.analytics.metrics import geo_precision_flag as _geo_flag
 
     geo_flag = _geo_flag(prop.latitude, prop.longitude)
     geo_donut = [
@@ -474,7 +411,6 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
         },
     ]
 
-    # ---- 10. Engagement_Heat_Score ------------------------------------------
     since = now - datetime.timedelta(days=HEAT_WINDOW_DAYS)
     recent_followups = [f_ for f_ in followups if f_.created_at and f_.created_at >= since]
     heat = len(recent_followups)
@@ -490,10 +426,9 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
         if t.status == Task.Status.CANCELLED:
             continue
         heat += task_weights.get(t.task_type, 1)
-    # Build heatmap: week x activity_type over last 4 weeks
+        
     heatmap = _build_engagement_heatmap(tasks, followups, since)
 
-    # ---- 11. Publish_Channel ------------------------------------------------
     channel_counts: Counter[str] = Counter()
     for l in listings:
         channel_counts[l.get_publish_channel_display() or l.publish_channel or "نامشخص"] += 1
@@ -501,7 +436,6 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
         {"label": ch, "count": cnt} for ch, cnt in sorted(channel_counts.items())
     ] or [{"label": "WEBSITE", "count": 0}]
 
-    # ---- 12. Avg_Lifespan per channel ---------------------------------------
     channel_lifespans: dict[str, list[int]] = {}
     for l in listings:
         ch_label = l.get_publish_channel_display() or l.publish_channel or "نامشخص"
@@ -522,7 +456,6 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
         )
     lifespan_chart.sort(key=lambda r: -r["avgLifespan"])
 
-    # ---- 13. Effective_Exposure_Days (timeline / Gantt) ---------------------
     timeline = []
     for l in listings:
         s = l.start_date_date or (l.created_at.date() if l.created_at else None)
@@ -545,7 +478,6 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
         )
     timeline.sort(key=lambda r: r["start"])
 
-    # ---- 14. Delegation_Indicator (stacked bar per channel) -----------------
     delegation_counts: dict[str, Counter[str]] = {}
     for l in listings:
         ch_label = l.get_publish_channel_display() or l.publish_channel or "نامشخص"
@@ -571,7 +503,6 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
             {"label": "—", "unassigned": 0, "selfManaged": 0, "delegated": 0}
         ]
 
-    # ---- 15. Listing_Burn_Rate (gauge: 0..1) --------------------------------
     if listings:
         burned = sum(
             1
@@ -589,7 +520,6 @@ def compute_property_report(prop: Property, *, filters: dict | None = None) -> d
             "نرخ اتلاف آگهی قابل محاسبه نیست (هیچ آگهی برای این ملک ثبت نشده)."
         )
 
-    # ---- KPI rollups --------------------------------------------------------
     kpis = {
         "tenureDays": tenure_days,
         "tasksOverdueCount": len(overdue_tasks),
@@ -672,7 +602,6 @@ def _burn_rate_label(rate: float | None) -> str:
 
 
 def _build_engagement_heatmap(tasks, followups, since) -> list[dict[str, Any]]:
-    """Return a 4-week × activity-type matrix of activity counts."""
     weeks = []
     now = timezone.now().date()
     for i in range(3, -1, -1):
@@ -724,17 +653,7 @@ def _build_engagement_heatmap(tasks, followups, since) -> list[dict[str, Any]]:
     return {"weeks": [w["label"] for w in weeks], "rows": rows}
 
 
-# ---------------------------------------------------------------------------
-# Aggregate (consultant/admin) reports
-# ---------------------------------------------------------------------------
-
-
 def compute_consultant_scope_report(user) -> dict[str, Any]:
-    """Cross-property aggregate within the caller's accessible scope.
-
-    - Admin: all active properties, aggregated across the portfolio.
-    - Consultant: only their own properties.
-    """
     qs = accessible_properties(user)
     props = list(
         qs.prefetch_related("images", "tasks", "followups", "listings").order_by(
@@ -751,7 +670,6 @@ def compute_consultant_scope_report(user) -> dict[str, Any]:
     img_values = [p.images.count() for p in props]
     img_hist = _bin_histogram(img_values, BINS_IMAGES_COUNT)
 
-    # overdue tasks per property (sorted)
     today = _today()
     overdue_per_prop: list[dict[str, Any]] = []
     tasks_overdue_total = 0
@@ -779,10 +697,7 @@ def compute_consultant_scope_report(user) -> dict[str, Any]:
             ).count()
         )
 
-    # price per sqm scatter (lat/lng → value)
-    # One query resolves every property's sale price, so the map does not fire
-    # a lookup per row.
-    from apps.common.metrics import annotate_effective_prices as _price_map_for
+    from apps.analytics.metrics import annotate_effective_prices as _price_map_for
 
     _prices = _price_map_for(props)
     price_map = []
@@ -802,7 +717,6 @@ def compute_consultant_scope_report(user) -> dict[str, Any]:
             "نقشه قیمت/متر به‌دلیل نبود مختصات جغرافیایی در داده‌ها خالی است."
         )
 
-    # publish channels across all listings in scope
     accessible_listings = Listing.objects.filter(property__in=props).select_related(
         "property"
     )
@@ -811,8 +725,7 @@ def compute_consultant_scope_report(user) -> dict[str, Any]:
         channel_counts[l.get_publish_channel_display() or l.publish_channel] += 1
     channel_chart = [{"label": k, "count": v} for k, v in channel_counts.items()]
 
-    # geo precision donut
-    from apps.common.metrics import geo_precision_flag
+    from apps.analytics.metrics import geo_precision_flag
 
     geo_good = sum(1 for p in props if geo_precision_flag(p.latitude, p.longitude))
     geo_bad = len(props) - geo_good
@@ -849,10 +762,6 @@ def compute_consultant_scope_report(user) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# CSV export
-# ---------------------------------------------------------------------------
-
 CSV_TRANSLATIONS = {
     "propertyId": "شناسه ملک",
     "title": "عنوان",
@@ -878,7 +787,6 @@ CSV_TRANSLATIONS = {
 
 
 def property_report_csv_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
-    """Flatten a single-property report into one CSV row with KPIs."""
     prop = report["property"]
     kpis = report["kpis"]
     row = {"propertyId": prop["id"], "title": prop["title"], "internalCode": prop["internalCode"]}
@@ -892,14 +800,6 @@ def property_report_csv_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _sanitize_csv_cell(value: Any) -> Any:
-    """Neutralise formula injection in spreadsheet cells.
-
-    Excel/LibreOffice treat cells beginning with ``=``, ``+``, ``-``, ``@``,
-    tab or carriage return as formulas. An attacker who can control a field
-    that ends up in a CSV export can otherwise turn it into a malicious
-    formula. Prefixing a single quote keeps the visible text intact while
-    preventing formula evaluation.
-    """
     if not isinstance(value, str):
         return value
     if value and value[0] in {"=", "+", "-", "@", "\t", "\r"}:
@@ -913,7 +813,6 @@ def render_csv(rows: list[dict[str, Any]], fieldnames: list[str] | None = None) 
     if fieldnames is None:
         fieldnames = list(rows[0].keys())
     buf = io.StringIO()
-    # BOM so Excel opens Persian correctly
     buf.write("\ufeff")
     writer = csv.DictWriter(buf, fieldnames=fieldnames)
     writer.writeheader()

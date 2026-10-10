@@ -4,15 +4,6 @@ import { SelectField } from "./SelectField";
 import { JalaliDateInput } from "./JalaliDateInput";
 import { cx } from "../../lib/utils";
 
-/**
- * Renders the custom fields an administrator configured for a property or deal
- * type, from the schema returned by `/basics/api/schema/...`.
- *
- * Deliberately built from the existing `Input` / `SelectField` primitives and
- * the same `grid grid-cols-2 gap-4` rhythm as the rest of the wizards, so the
- * generated fields are visually indistinguishable from the hand-written ones.
- */
-
 export type AttributeOption = { value: string; displayName: string };
 
 export type AttributeField = {
@@ -35,12 +26,10 @@ export type AttributeSchema = {
   facilities: AttributeField[];
 };
 
-/** Label text including the unit, e.g. "متراژ زمین (متر مربع)". */
 function labelFor(field: AttributeField) {
   return field.unit ? `${field.displayName} (${field.unit})` : field.displayName;
 }
 
-/** A single dynamic field, mapped to the right primitive for its data type. */
 function AttributeInput({
   field,
   value,
@@ -54,7 +43,6 @@ function AttributeInput({
 }) {
   switch (field.dataType) {
     case "boolean":
-      // Matches the consultant notice / toggle rows already used in the wizards.
       return (
         <label className="flex items-center gap-2.5 rounded-xl border border-border bg-input-background px-3.5 py-2.5 cursor-pointer hover:border-primary transition-colors">
           <input
@@ -129,40 +117,40 @@ function AttributeInput({
       );
 
     case "integer":
-    case "decimal":
+    case "decimal": {
+      const isPriceField = field.inputType === "price" || Boolean(field.unit && field.unit.includes("تومان"));
       return (
         <Input
           label={labelFor(field)}
-          type="number"
-          placeholder={field.inputType === "price" ? "مبلغ به تومان" : ""}
+          type={isPriceField ? "text" : "number"}
+          isPrice={isPriceField}
+          placeholder={isPriceField ? "مبلغ به تومان" : ""}
           value={value ?? ""}
           onChange={(v) => onChange(field.name, v)}
           required={field.isRequired}
           error={error}
         />
       );
+    }
 
-    default:
+    default: {
+      const isPriceField = field.inputType === "price" || Boolean(field.unit && field.unit.includes("تومان"));
       return (
         <Input
           label={labelFor(field)}
+          isPrice={isPriceField}
+          placeholder={isPriceField ? "مبلغ به تومان" : undefined}
           value={value ?? ""}
           onChange={(v) => onChange(field.name, v)}
           required={field.isRequired}
           error={error}
         />
       );
+    }
   }
 }
 
-/**
- * The dynamic part of a form: configured fields in a two-column grid, with
- * boolean amenities grouped underneath.
- *
- * Core fields are skipped — those are the wizard's own inputs (متراژ، تعداد
- * اتاق …) and are rendered by the wizard itself so their placement and
- * validation stay exactly as they were.
- */
+
 function DynamicAttributeFields({
   schema,
   values,

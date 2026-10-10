@@ -3,7 +3,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
-from apps.common.metrics import consultant_performance_metrics
+from apps.analytics.metrics import consultant_performance_metrics
 
 from .models import AdminProfile, ConsultantProfile, UserRole
 
@@ -109,7 +109,6 @@ class ConsultantProfileSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        # Only admins may (un)archive a consultant account.
         if not self.context.get("is_admin_request"):
             validated_data.pop("is_active", None)
 
@@ -117,8 +116,6 @@ class ConsultantProfileSerializer(serializers.ModelSerializer):
         last_name = validated_data.pop("last_name", None)
         username = validated_data.pop("username", None)
         email = validated_data.pop("email", None)
-        # Password changes must go through the dedicated endpoints so the
-        # current password is checked and other sessions are invalidated.
         validated_data.pop("password", None)
 
         user = instance.user
@@ -163,13 +160,6 @@ class ConsultantProfileSerializer(serializers.ModelSerializer):
         return data
 
 class AdminProfileSerializer(serializers.ModelSerializer):
-    """Serializer for the admin's own profile.
-
-    Keeps exactly the same response shape as ConsultantProfileSerializer
-    (profile fields + nested ``user`` object + write-only account fields)
-    so the "My Profile" UI works identically for admins.
-    """
-
     first_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     last_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
     username = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -245,7 +235,6 @@ class AdminProfileSerializer(serializers.ModelSerializer):
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
 
-        # Keep the display name consistent when only first/last name is edited.
         if not instance.full_name:
             full = f"{user.first_name} {user.last_name}".strip()
             if full:

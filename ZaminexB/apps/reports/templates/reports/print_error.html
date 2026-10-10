@@ -1,0 +1,58 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }} — CRM زمینکس</title>
+    <style>
+        @font-face {
+            font-family: IRANRounded;
+            font-style: normal;
+            font-weight: 400 900;
+            src: url("{% static 'fonts/eot/IRAN-Rounded.eot' %}") format('embedded-opentype'),
+                 url("{% static 'fonts/woff/IRAN-Rounded.woff' %}") format('woff'),
+                 url("{% static 'fonts/ttf/IRAN-Rounded.ttf' %}") format('truetype');
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: IRANRounded, Tahoma, sans-serif;
+            background: #EEF2F6;
+            color: #0F172A;
+        }
+        .card {
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 1px 10px rgba(15, 23, 42, 0.12);
+            padding: 36px 40px;
+            max-width: 420px;
+            text-align: center;
+        }
+        .card-icon { font-size: 34px; line-height: 1; }
+        .card h1 { font-size: 17px; margin: 14px 0 6px; }
+        .card p { font-size: 13px; color: #475569; margin: 0 0 20px; line-height: 1.9; }
+        .card a {
+            display: inline-block;
+            font-size: 12.5px;
+            color: #fff;
+            background: #0BB68A;
+            text-decoration: none;
+            border-radius: 10px;
+            padding: 8px 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="card-icon">⚠️</div>
+        <h1>{{ title }}</h1>
+        <p>{{ message }}</p>
+        <a href="/">بازگشت به برنامه</a>
+    </div>
+</body>
+</html>

@@ -1,31 +1,3 @@
-"""Regression tests for the CSRF ``Origin`` failure that blocked logging in.
-
-The bug
--------
-``SecurityHeadersMiddleware`` used to send ``Referrer-Policy: no-referrer``.
-That header does more than hide the referrer: per the Fetch Standard's
-"append a request Origin header" algorithm, for a request whose mode is not
-``cors`` and whose method is neither ``GET`` nor ``HEAD``, a referrer policy
-of ``no-referrer`` makes the browser send ``Origin: null``.
-
-An HTML ``<form method="post">`` submit — which is exactly how this project
-logs a user in — is such a request. Django (>= 4.0) checks ``Origin`` against
-the trusted origins on every unsafe request, and ``null`` matches nothing, so
-the login POST was rejected with:
-
-    CSRF verification failed. Request aborted.
-    Origin checking failed - null does not match any trusted origins.
-
-The fix is ``Referrer-Policy: same-origin`` (also Django's own default for
-``SECURE_REFERRER_POLICY``): the referrer is still withheld from every
-cross-origin destination, but our own same-origin POSTs keep a real ``Origin``
-so CSRF validation can actually run.
-
-These tests pin all three halves of that contract: the header we emit, the
-browser behaviour it implies, and the fact that a genuinely opaque or
-cross-site origin is still refused.
-"""
-
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
@@ -36,25 +8,16 @@ User = get_user_model()
 
 PASSWORD = "pw-secret-1"
 
-# Referrer policies that make a browser send `Origin: null` for a same-origin,
-# non-CORS POST (i.e. an HTML form submit) served over plain HTTP.
 ORIGIN_NULLING_POLICIES = {"no-referrer"}
 
 
 def browser_origin_for_form_post(referrer_policy, site_origin):
-    """The ``Origin`` a browser sends for a form submit under this policy.
-
-    Mirrors the Fetch Standard so the tests exercise what a real browser does
-    instead of hard-coding a header we happen to expect.
-    """
     if (referrer_policy or "").strip().lower() in ORIGIN_NULLING_POLICIES:
         return "null"
     return site_origin
 
 
 class ReferrerPolicyTests(TestCase):
-    """The emitted policy must never null out the Origin header again."""
-
     def test_referrer_policy_is_not_origin_nulling(self):
         resp = self.client.get("/accounts/login/")
         policy = resp.headers.get("Referrer-Policy")
@@ -66,7 +29,6 @@ class ReferrerPolicyTests(TestCase):
         )
 
     def test_referrer_policy_still_protects_privacy(self):
-        """Relaxing the policy must not start leaking referrers off-site."""
         resp = self.client.get("/accounts/login/")
         self.assertIn(
             resp.headers.get("Referrer-Policy"),
@@ -83,7 +45,6 @@ class ReferrerPolicyTests(TestCase):
         )
 
     def test_other_security_headers_are_unchanged(self):
-        """The fix must not weaken the rest of the hardening pass."""
         resp = self.client.get("/accounts/login/")
         self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
         self.assertEqual(resp.headers.get("X-Frame-Options"), "DENY")
@@ -92,8 +53,6 @@ class ReferrerPolicyTests(TestCase):
 
 
 class LoginOriginTests(TestCase):
-    """The reported reproduction: log in, log out, log in again."""
-
     SITE_ORIGIN = "http://testserver"
 
     @classmethod
@@ -103,7 +62,6 @@ class LoginOriginTests(TestCase):
         )
 
     def _submit_login_like_a_browser(self, client):
-        """POST the login form with the Origin a real browser would send."""
         page = client.get("/accounts/login/")
         origin = browser_origin_for_form_post(
             page.headers.get("Referrer-Policy"), self.SITE_ORIGIN
@@ -124,7 +82,6 @@ class LoginOriginTests(TestCase):
         self.assertEqual(resp.status_code, 302, "The login form submit was rejected.")
 
     def test_login_after_logout_succeeds(self):
-        """Logging out must not lock the user out of logging back in."""
         client = Client(enforce_csrf_checks=True)
         self.assertEqual(self._submit_login_like_a_browser(client).status_code, 302)
         self.assertEqual(client.get("/").status_code, 200)
@@ -136,8 +93,6 @@ class LoginOriginTests(TestCase):
         )
         self.assertEqual(logout.status_code, 302)
 
-        # Django rotates the CSRF token on login/logout, so this second pass is
-        # the one that used to fail.
         again = self._submit_login_like_a_browser(client)
         self.assertEqual(
             again.status_code, 302, "Could not log in again after logging out."
@@ -145,7 +100,6 @@ class LoginOriginTests(TestCase):
         self.assertEqual(client.get("/").status_code, 200)
 
     def test_repeated_login_logout_cycles(self):
-        """Three full cycles — nothing may accumulate across sessions."""
         client = Client(enforce_csrf_checks=True)
         for attempt in range(3):
             resp = self._submit_login_like_a_browser(client)
@@ -158,8 +112,6 @@ class LoginOriginTests(TestCase):
 
 
 class CsrfStillProtectsTests(TestCase):
-    """The fix removes a false positive; it must not remove the protection."""
-
     @classmethod
     def setUpTestData(cls):
         cls.user = User.objects.create_user(
@@ -184,10 +136,6 @@ class CsrfStillProtectsTests(TestCase):
         self.assertEqual(resp.status_code, 403)
 
     def test_opaque_null_origin_is_still_rejected(self):
-        """A sandboxed iframe or data: URL genuinely sends Origin: null.
-
-        We fixed the cause of the spurious null; we did not start trusting it.
-        """
         client = Client(enforce_csrf_checks=True)
         resp = self._login_post(client, "null")
         self.assertEqual(resp.status_code, 403)
@@ -217,8 +165,6 @@ class CsrfStillProtectsTests(TestCase):
 
 
 class CsrfTrustedOriginsTests(TestCase):
-    """Every allowed host must also be a trusted CSRF origin."""
-
     def test_allowed_hosts_are_trusted_origins(self):
         for host in settings.ALLOWED_HOSTS:
             if host == "*":
@@ -232,18 +178,14 @@ class CsrfTrustedOriginsTests(TestCase):
             )
 
     def test_wildcard_host_does_not_become_an_origin(self):
-        """`*` must never be turned into an origin that trusts everything."""
         self.assertNotIn("https://*", settings.CSRF_TRUSTED_ORIGINS)
         self.assertNotIn("http://*", settings.CSRF_TRUSTED_ORIGINS)
 
     def test_allowed_hosts_is_not_overwritten(self):
-        """A stray second assignment used to discard the configured hosts."""
         self.assertTrue(settings.ALLOWED_HOSTS, "ALLOWED_HOSTS must not be empty.")
 
 
 class ApiWriteOriginTests(TestCase):
-    """The SPA's fetch-based writes must work under the shipped headers."""
-
     @classmethod
     def setUpTestData(cls):
         cls.admin = User.objects.create_user(
@@ -262,13 +204,10 @@ class ApiWriteOriginTests(TestCase):
             data=payload,
             content_type="application/json",
             HTTP_X_CSRFTOKEN=self.csrf,
-            # fetch() defaults to mode "cors", so the browser always sends the
-            # real origin here regardless of the referrer policy.
             HTTP_ORIGIN="http://testserver",
         )
 
     def test_create_province_city_and_district(self):
-        """The three levels of the regions screen, end to end."""
         province = self._post("/basics/api/provinces/", '{"displayName": "مازندران"}')
         self.assertEqual(province.status_code, 201, province.content)
         province_id = province.json()["id"]
@@ -288,15 +227,6 @@ class ApiWriteOriginTests(TestCase):
 
 
 class GeographyErrorMessageTests(TestCase):
-    """Parent-field errors must be actionable Persian sentences.
-
-    Adding a city or a district can fail for a reason that has nothing to do
-    with its label — no province chosen, or a parent that was deleted in
-    another tab. DRF reports those against the parent key, and the UI showed a
-    generic "خطا در اضافه کردن شهر" for all of them. These tests pin the
-    wording so the operator is told what to actually fix.
-    """
-
     @classmethod
     def setUpTestData(cls):
         cls.admin = User.objects.create_user(
@@ -345,7 +275,6 @@ class GeographyErrorMessageTests(TestCase):
         )
 
     def test_duplicate_label_message_is_unchanged(self):
-        """The existing, already-good duplicate message must not regress."""
         province = self._post(
             "/basics/api/provinces/", '{"displayName": "مازندران"}'
         ).json()

@@ -1,10 +1,3 @@
-"""Tests for the price that metrics and reports read (phase 6).
-
-Pricing moved to the listing in phase 3, but the valuation metrics still read
-the deprecated ``Property.price`` column, so anything created through the new
-flow reported no price at all. These tests lock in the corrected behaviour.
-"""
-
 import datetime
 import io
 
@@ -14,7 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.basics.models import DealType, PropertyType
-from apps.common.metrics import (
+from apps.analytics.metrics import (
     annotate_effective_prices,
     build_neighborhood_price_per_sqm_map,
     effective_sale_price,
@@ -69,7 +62,6 @@ class EffectivePriceTests(TestCase):
         self.assertEqual(effective_sale_price(prop), 10_000_000_000)
 
     def test_a_rental_listing_contributes_no_sale_price(self):
-        """A deposit is not a purchase figure; averaging it would be wrong."""
         prop = self._property("EP-2")
         self._listing(prop, self.rent, deposit=900_000_000, monthly_rent=50_000_000)
 
@@ -83,7 +75,6 @@ class EffectivePriceTests(TestCase):
         self.assertEqual(effective_sale_price(prop), 10_000_000_000)
 
     def test_the_highest_sale_listing_wins(self):
-        """The current asking price, not an average of past ones."""
         prop = self._property("EP-4")
         self._listing(prop, self.sale, sale_price=9_000_000_000)
         self._listing(prop, self.presale, sale_price=11_000_000_000)
@@ -91,7 +82,6 @@ class EffectivePriceTests(TestCase):
         self.assertEqual(effective_sale_price(prop), 11_000_000_000)
 
     def test_it_falls_back_to_the_legacy_column(self):
-        """Records predating the split keep their number."""
         prop = self._property("EP-5", price=7_000_000_000)
         self.assertEqual(effective_sale_price(prop), 7_000_000_000)
 
@@ -102,7 +92,6 @@ class EffectivePriceTests(TestCase):
         self.assertEqual(effective_sale_price(prop), 8_000_000_000)
 
     def test_a_listing_without_a_deal_type_counts_as_a_sale(self):
-        """Migrated listings have a price but may predate deal types."""
         prop = self._property("EP-7")
         Listing.objects.create(
             property=prop,
@@ -118,8 +107,6 @@ class EffectivePriceTests(TestCase):
 
 
 class MarketMetricTests(TestCase):
-    """The metrics that broke: price/m² and the deviation index."""
-
     @classmethod
     def setUpTestData(cls):
         call_command("seed_basics", stdout=io.StringIO())
@@ -149,7 +136,6 @@ class MarketMetricTests(TestCase):
         return prop
 
     def test_price_per_sqm_uses_the_listing_price(self):
-        """This returned None before the fix."""
         prop = self._priced("MM-1", 10_000_000_000, area=100)
 
         metrics = property_market_metrics(prop)
@@ -163,7 +149,6 @@ class MarketMetricTests(TestCase):
         self.assertEqual(averages["نمونه"], 150_000_000.0)
 
     def test_properties_without_a_price_are_left_out_of_the_average(self):
-        """Counting them as zero would halve the neighbourhood average."""
         self._priced("MM-4", 10_000_000_000, area=100, neighborhood="تکی")
         Property.objects.create(
             title="بدون قیمت",
@@ -183,9 +168,6 @@ class MarketMetricTests(TestCase):
         expensive = self._priced("MM-7", 20_000_000_000, area=100, neighborhood="انحراف")
 
         metrics = property_market_metrics(expensive)
-        # The property is excluded from its own neighbourhood average (consistent
-        # with the full-report comparables), so the only comparable is MM-6 at
-        # 100m/m²; this one is 200m/m² → +100%.
         self.assertAlmostEqual(metrics["priceDeviationIndex"], 1.0, places=3)
 
     def test_bulk_resolution_matches_the_single_lookup(self):
@@ -197,9 +179,7 @@ class MarketMetricTests(TestCase):
         self.assertEqual(bulk[b.id], 20_000_000_000)
 
     def test_days_on_market_reads_from_listing_start_date(self):
-        """daysOnMarket must reflect the listing, not property creation."""
         prop = self._priced("MM-10", 10_000_000_000)
-        # property created 60 days ago, listing started 30 days ago
         Property.objects.filter(pk=prop.pk).update(
             created_at=timezone.now() - datetime.timedelta(days=60)
         )
@@ -222,15 +202,12 @@ class MarketMetricTests(TestCase):
         self.assertEqual(metrics["daysOnMarket"], 12)
 
     def test_deviation_is_none_when_no_comparables_exist(self):
-        """A lone property must not compare against itself (false 0%)."""
         prop = self._priced("MM-12", 10_000_000_000, neighborhood="منفرد")
         metrics = property_market_metrics(prop)
         self.assertIsNone(metrics["priceDeviationIndex"])
 
 
 class SerializedPriceTests(TestCase):
-    """The API keeps exposing `price`, so the frontend needs no change."""
-
     @classmethod
     def setUpTestData(cls):
         call_command("seed_basics", stdout=io.StringIO())
@@ -242,7 +219,7 @@ class SerializedPriceTests(TestCase):
         )
         cls.property = Property.objects.create(
             title="ملک",
-            internal_code="SER-1",
+            internal_code="ZF_9051",
             consultant=cls.agent,
             property_type="APARTMENT",
             area=100,
@@ -265,15 +242,16 @@ class SerializedPriceTests(TestCase):
         response = self.client.get("/properties/api/properties/")
         self.assertEqual(response.status_code, 200)
 
-        row = next(p for p in response.json()["results"] if p["internalCode"] == "SER-1")
+        row = next(p for p in response.json()["results"] if p["internalCode"] == "ZF_9051")
         self.assertEqual(int(float(row["price"])), 10_000_000_000)
-        self.assertEqual(row["pricePerSqm"], 100_000_000.0)
+        detail = self.client.get(f"/properties/api/properties/{self.property.pk}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["pricePerSqm"], 100_000_000.0)
 
     def test_an_unpriced_property_reports_null_rather_than_zero(self):
-        """Zero would look like a real price of nothing in the UI."""
         Property.objects.create(
             title="بدون آگهی",
-            internal_code="SER-2",
+            internal_code="ZF_9052",
             consultant=self.agent,
             property_type="APARTMENT",
             area=80,
@@ -281,7 +259,7 @@ class SerializedPriceTests(TestCase):
             neighborhood="محله",
         )
         response = self.client.get("/properties/api/properties/")
-        row = next(p for p in response.json()["results"] if p["internalCode"] == "SER-2")
+        row = next(p for p in response.json()["results"] if p["internalCode"] == "ZF_9052")
         self.assertIsNone(row["price"])
 
     def test_the_property_report_uses_the_derived_price(self):
@@ -297,8 +275,6 @@ class SerializedPriceTests(TestCase):
 
 
 class QueryCountTests(TestCase):
-    """Deriving the price must not reintroduce an N+1."""
-
     @classmethod
     def setUpTestData(cls):
         call_command("seed_basics", stdout=io.StringIO())
@@ -329,7 +305,7 @@ class QueryCountTests(TestCase):
     def test_the_query_count_does_not_grow_with_the_number_of_rows(self):
         self.client.force_login(self.admin)
 
-        with self.assertNumQueries(15):
+        with self.assertNumQueries(9):
             response = self.client.get("/properties/api/properties/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()["results"]), 6)

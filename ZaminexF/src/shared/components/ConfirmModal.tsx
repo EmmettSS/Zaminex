@@ -29,8 +29,5 @@ function ConfirmModal({ open, title, message, onConfirm, onCancel, danger = fals
   );
 }
 
-// =============================================================================
-//  Action Menu
-// =============================================================================
 
 export { ConfirmModal };

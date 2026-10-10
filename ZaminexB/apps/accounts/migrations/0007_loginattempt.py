@@ -1,5 +1,3 @@
-# Generated manually for account-scoped login throttling and Persian-facing labels.
-
 import django.core.validators
 from django.db import migrations, models
 

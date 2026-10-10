@@ -3,7 +3,12 @@ from rest_framework import serializers
 
 from apps.basics.models import Attribute, DealType
 from apps.common.attribute_serializers import AttributeValuesMixin
-from apps.common.metrics import listing_marketing_metrics
+from apps.analytics.metrics import (
+    content_richness_score,
+    engagement_heat_score,
+    images_count_for_property,
+    listing_marketing_metrics,
+)
 from .models import Listing, ListingAttributeValue
 from apps.properties.models import Property
 from apps.accounts.models import User
@@ -14,10 +19,13 @@ class PropertyMiniSerializer(serializers.ModelSerializer):
     price = serializers.SerializerMethodField()
 
     def get_price(self, obj):
-        """Derived from the property's sale listings (see metrics)."""
-        from apps.common.metrics import effective_sale_price
+        price_map = self.context.get("effective_price_map")
+        if price_map is not None:
+            price = price_map.get(obj.pk, obj.price)
+        else:
+            from apps.analytics.metrics import effective_sale_price
 
-        price = effective_sale_price(obj)
+            price = effective_sale_price(obj)
         return str(price) if price is not None else None
 
 
@@ -51,7 +59,6 @@ class UserMiniSerializer(serializers.ModelSerializer):
         return profile.mobile if profile else None
 
 class ListingSerializer(AttributeValuesMixin, serializers.ModelSerializer):
-    # --- dynamic attributes (phase 3) --------------------------------------
     attribute_value_model = ListingAttributeValue
     attribute_owner_field = "listing"
     attribute_entity = Attribute.Entity.LISTING
@@ -59,9 +66,6 @@ class ListingSerializer(AttributeValuesMixin, serializers.ModelSerializer):
     attributes = serializers.SerializerMethodField()
     attributeDetails = serializers.SerializerMethodField()
 
-    # --- deal type & pricing -----------------------------------------------
-    # Both live on the listing: one property can be advertised for sale and for
-    # rent simultaneously, so neither belongs on the property record.
     dealType = serializers.PrimaryKeyRelatedField(
         source="deal_type",
         queryset=DealType.objects.all(),
@@ -91,7 +95,11 @@ class ListingSerializer(AttributeValuesMixin, serializers.ModelSerializer):
     channels = serializers.SerializerMethodField()
     score = serializers.SerializerMethodField()
     views = serializers.SerializerMethodField()
-    publishChannel = serializers.CharField(source="publish_channel", read_only=True)
+    
+    publishChannel = serializers.ChoiceField(
+        choices=Listing.PublishChannel.choices,
+        source="publish_channel",
+    )
     effectiveExposureDays = serializers.SerializerMethodField()
     delegationIndicator = serializers.SerializerMethodField()
     isBurnedListing = serializers.SerializerMethodField()
@@ -102,7 +110,7 @@ class ListingSerializer(AttributeValuesMixin, serializers.ModelSerializer):
     class Meta:
         model = Listing
         fields = [
-            'id', 'title', 'description', 'status', 'publish_channel', 'publishChannel',
+            'id', 'title', 'description', 'status', 'publishChannel',
             'start_date', 'end_date', 'assigned_to', 'created_by',
             'priority', 'is_featured', 'created_at', 'updated_at',
             'property', 'property_detail', 'created_by_detail', 'assigned_to_detail',
@@ -151,7 +159,20 @@ class ListingSerializer(AttributeValuesMixin, serializers.ModelSerializer):
     def get_engagementHeatScore(self, obj):
         return self._listing_metrics(obj).get("engagementHeatScore")
 
-    # -- persistence --------------------------------------------------------
+    def validate_salePrice(self, value):
+        if value is not None and value <= 0:
+            raise serializers.ValidationError("قیمت فروش باید بیشتر از صفر باشد.")
+        return value
+
+    def validate_deposit(self, value):
+        if value is not None and value <= 0:
+            raise serializers.ValidationError("مبلغ رهن / ودیعه باید بیشتر از صفر باشد.")
+        return value
+
+    def validate_monthlyRent(self, value):
+        if value is not None and value <= 0:
+            raise serializers.ValidationError("اجاره ماهانه باید بیشتر از صفر باشد.")
+        return value
 
     def validate(self, attrs):
         from apps.common.access import can_access_property
@@ -185,3 +206,35 @@ class ListingSerializer(AttributeValuesMixin, serializers.ModelSerializer):
             instance, instance.deal_type, "attribute_links"
         )
         return instance
+
+_LISTING_LIST_EXCLUDED = {
+    "description",
+    "attributes",
+    "attributeDetails",
+    "created_by_detail",
+    "priceDetails",
+    "effectiveExposureDays",
+    "delegationIndicator",
+    "isBurnedListing",
+    "generatedHighProbLeads",
+    "contentRichnessScore",
+    "engagementHeatScore",
+}
+
+
+class ListingListSerializer(ListingSerializer):
+    class Meta(ListingSerializer.Meta):
+        fields = [
+            field
+            for field in ListingSerializer.Meta.fields
+            if field not in _LISTING_LIST_EXCLUDED
+        ]
+
+    def get_score(self, obj):
+        prop = obj.property
+        img_count = images_count_for_property(prop) if prop else 0
+        return int(round((content_richness_score(obj, img_count) / 5) * 100))
+
+    def get_views(self, obj):
+        prop = obj.property
+        return engagement_heat_score(prop) if prop else 0

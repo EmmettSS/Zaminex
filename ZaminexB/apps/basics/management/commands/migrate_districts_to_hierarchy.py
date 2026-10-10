@@ -1,29 +1,3 @@
-"""Move the flat district list into the Province → City → District hierarchy.
-
-Before phase 4 a district was a single free-text name (`common.District`) and
-`Property.neighborhood` stored an unvalidated string. Both are replaced by a
-real hierarchy so an agency can describe its coverage area properly.
-
-The agency owns its own geography, so nothing is invented: no province or city
-list is shipped. Existing data still has to land somewhere, though, so this
-command groups every district found in the old table and on existing properties
-under one province/city that the operator names explicitly.
-
-    # Preview — writes nothing
-    python manage.py migrate_districts_to_hierarchy \
-        --province "مازندران" --city "ساری" --dry-run
-
-    # Apply
-    python manage.py migrate_districts_to_hierarchy \
-        --province "مازندران" --city "ساری"
-
-Afterwards an administrator adds the real provinces and cities from the
-"مدیریت مناطق" screen and can move districts across with a normal edit.
-
-Idempotent: properties that already point at a district are left alone, so it is
-safe to re-run after adding more legacy rows.
-"""
-
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
@@ -36,7 +10,6 @@ from apps.properties.models import Property
 
 
 def _slug(value: str) -> str:
-    """A URL-safe slug that keeps Persian characters readable."""
     return slugify(value, allow_unicode=True) or None
 
 
@@ -75,7 +48,6 @@ class Command(BaseCommand):
         self.stdout.write(f"  استان مقصد: {province_name}")
         self.stdout.write(f"  شهر مقصد  : {city_name}")
 
-        # --- province & city --------------------------------------------------
         province = Province.objects.filter(display_name=province_name).first()
         if province is None:
             province = Province(
@@ -105,7 +77,6 @@ class Command(BaseCommand):
         else:
             self.stdout.write(f"  = شهر «{city_name}» از قبل موجود بود")
 
-        # --- collect every distinct neighbourhood name ------------------------
         names: list[str] = []
 
         for legacy in LegacyDistrict.objects.all():
@@ -128,7 +99,6 @@ class Command(BaseCommand):
                 transaction.set_rollback(True)
             return
 
-        # --- create the districts ---------------------------------------------
         self.stdout.write(f"\n  {len(names)} محله برای انتقال:")
         districts: dict[str, District] = {}
         created = reused = 0
@@ -157,7 +127,6 @@ class Command(BaseCommand):
             created += 1
             self.stdout.write(f"    + {label}")
 
-        # --- point properties at their district --------------------------------
         linked = skipped = 0
         for prop in Property.objects.filter(district__isnull=True):
             label = (prop.neighborhood or "").strip()
@@ -166,8 +135,6 @@ class Command(BaseCommand):
                 skipped += 1
                 continue
             if not dry_run:
-                # update() avoids re-triggering save() (which would just rewrite
-                # the same neighbourhood text back).
                 Property.objects.filter(pk=prop.pk).update(district=district)
             linked += 1
 

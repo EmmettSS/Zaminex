@@ -22,7 +22,7 @@ import { PropertyCombobox } from "../../../shared/components/ui/PropertyCombobox
 import { ConsultantCombobox } from "../../../shared/components/ui/ConsultantCombobox";
 import { DistrictCombobox } from "../../../shared/components/ui/DistrictCombobox";
 import { apiFetch, readJson, apiErrorMessage, getCsrfToken } from "../../../shared/lib/apiClient";
-import { toast } from "../../../shared/lib/utils";
+import { toast, saveBlob } from "../../../shared/lib/utils";
 import { CHART_COLORS, DELEGATION_COLORS } from "../../../shared/lib/constants";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis, ScatterChart, ZAxis, Scatter, PieChart as RechartsPieChart, RadialBarChart, RadialBar } from "recharts";
 import { Building2, FileText, CheckSquare, BellRing, Users, Activity, Settings, Plus, RefreshCw, Eye, Edit2, Trash2, Archive, Clock, MapPin, Check, X, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, SlidersHorizontal, ArrowUpRight, LayoutGrid, List, Download, Search, MoreVertical, Phone, Mail, Calendar, TrendingUp, Star, Shield, Lock, Key, Send, Loader2, AlertTriangle, Info, XCircle, CheckCircle2, TriangleAlert, Columns, MessageSquare, Sparkles, GripVertical, Building, History, Flame, Image, Zap, LayoutDashboard, Command, Filter, Award, BarChart3, Layers, AlertCircle, Target } from "lucide-react";
@@ -74,19 +74,27 @@ function PropertyReportsPage({ csrfToken, propertyId, propertyPreview, onBack }:
         return;
       }
       const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `property-report-${propertyId}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(a.href);
+      saveBlob(blob, `property-report-${propertyId}.csv`);
       toast({ type: "success", message: "خروجی CSV دریافت شد." });
     } catch {
       toast({ type: "error", message: "خطا در تهیه خروجی CSV" });
     } finally {
       setExporting(false);
     }
+  };
+
+  const handleExportPdf = () => {
+    if (!propertyId) return;
+    const qs = new URLSearchParams();
+    if (dateFrom) qs.set("date_from", dateFrom);
+    if (dateTo) qs.set("date_to", dateTo);
+    const url = `/reports/properties/${propertyId}/print/${qs.toString() ? "?" + qs.toString() : ""}`;
+    const win = window.open(url, "_blank", "noopener");
+    if (!win) {
+      toast({ type: "warning", message: "مرورگر اجازه باز کردن پنجره جدید را نداد؛ دسترسی pop-up را فعال کنید و دوباره تلاش کنید." });
+      return;
+    }
+    toast({ type: "info", message: "صفحه چاپ گزارش باز شد؛ در پنجره پرینت مقصد را «ذخیره به PDF» یا پرینتر انتخاب کنید." });
   };
 
   if (!propertyId) {
@@ -108,6 +116,7 @@ function PropertyReportsPage({ csrfToken, propertyId, propertyPreview, onBack }:
         actions={
           <div className="flex gap-2">
             <Btn variant="ghost" size="sm" onClick={onBack}><ChevronRight size={13} />بازگشت به ملک</Btn>
+            <Btn variant="secondary" size="sm" onClick={handleExportPdf} disabled={!data}><Download size={13} />خروجی PDF</Btn>
             <Btn variant="secondary" size="sm" onClick={handleExport} disabled={exporting || !data}><Download size={13} />{exporting ? "در حال تهیه…" : "خروجی CSV"}</Btn>
           </div>
         }
@@ -463,9 +472,5 @@ function PropertyReportsPage({ csrfToken, propertyId, propertyPreview, onBack }:
   );
 }
 
-
-// =============================================================================
-//  Districts Management
-// =============================================================================
 
 export { PropertyReportsPage };

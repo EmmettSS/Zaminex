@@ -45,7 +45,6 @@ const LISTING_STATUS_COLORS: Record<string, string> = {
   ARCHIVED: "#64748B",
 };
 
-/** Radar axis labels sit outside the polygon, next to their own spoke. */
 function splitRadarLabel(value: string): string[] {
   const parts = value.trim().split(/\s+/).filter(Boolean);
   if (parts.length >= 2) return [parts[0], parts.slice(1).join(" ")];

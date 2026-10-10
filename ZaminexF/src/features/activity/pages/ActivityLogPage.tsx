@@ -14,13 +14,13 @@ import { PageHeader } from "../../../shared/components/ui/PageHeader";
 import { ConfirmModal } from "../../../shared/components/ConfirmModal";
 import { Pagination } from "../../../shared/components/Pagination";
 import { DistrictCombobox } from "../../../shared/components/ui/DistrictCombobox";
+import { ActivityUserCombobox } from "../../../shared/components/ui/ActivityUserCombobox";
 import { apiFetch, readJson, apiErrorMessage, getCsrfToken } from "../../../shared/lib/apiClient";
 import { toast } from "../../../shared/lib/utils";
 import { Building2, LayoutDashboard, FileText, CheckSquare, Users, BarChart3, Settings, Bell, Search, LogOut, Plus, ChevronLeft, ChevronDown, ChevronRight, Clock, CheckCircle2, AlertCircle, MoreHorizontal, MapPin, Eye, Edit2, Trash2, Archive, Phone, Mail, Calendar, TrendingUp, Activity, Command, Star, List, LayoutGrid, Download, Shield, User, Lock, Key, RefreshCw, Circle, Zap, Target, Award, Upload, Check, AlertTriangle, Info, XCircle, Loader2, CircleCheck, TriangleAlert, Columns, Send, BellRing, X, ChevronUp, SlidersHorizontal, ArrowUpRight, Layers, MessageSquare, Sparkles, GripVertical, MoreVertical, Building, History, Flame, Image, Filter } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis, ReferenceLine, ScatterChart, Scatter, ZAxis, RadialBarChart, RadialBar } from "recharts";
 function ActivityLogPage({ csrfToken }: { csrfToken: string }) {
   const [filter, setFilter] = useState("all");
-  // "all" | "system" | the user's pk as a string
   const [userFilter, setUserFilter] = useState<string>("all");
   const [logUsers, setLogUsers] = useState<ActivityLogUserOption[]>([]);
   const [systemLogCount, setSystemLogCount] = useState(0);
@@ -64,7 +64,7 @@ function ActivityLogPage({ csrfToken }: { csrfToken: string }) {
     try {
       const res = await apiFetch("/common/api/activity-log/users/", { method: "GET" }, csrfToken);
       const data = await readJson(res);
-      if (!res.ok) return; // secondary control: degrade silently, page stays usable
+      if (!res.ok) return;
       setLogUsers(Array.isArray(data?.users) ? data.users : []);
       setSystemLogCount(typeof data?.systemCount === "number" ? data.systemCount : 0);
     } catch {
@@ -204,41 +204,16 @@ function ActivityLogPage({ csrfToken }: { csrfToken: string }) {
               </button>
             ))}
           </Card>
-          {!logUsersLoading && (logUsers.length > 0 || systemLogCount > 0) && (
-            <Card className="p-3">
-              <p className="text-xs font-semibold text-muted-foreground mb-2 px-1">فیلتر بر اساس کاربر</p>
-              <button
-                onClick={() => setUserFilter("all")}
-                className={cx("w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-right text-xs font-medium transition-colors mb-0.5", userFilter === "all" ? "bg-primary text-white" : "hover:bg-secondary text-foreground")}
-              >
-                <span>همه کاربران</span>
-              </button>
-              {systemLogCount > 0 && (
-                <button
-                  onClick={() => setUserFilter("system")}
-                  className={cx("w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-right text-xs font-medium transition-colors mb-0.5", userFilter === "system" ? "bg-primary text-white" : "hover:bg-secondary text-foreground")}
-                >
-                  <span className="flex items-center gap-1.5 truncate"><Settings size={12} />سیستم</span>
-                  <span className={cx("text-[10px] flex-shrink-0", userFilter === "system" ? "text-white/70" : "text-muted-foreground")}>{systemLogCount.toLocaleString("fa-IR")}</span>
-                </button>
-              )}
-              {logUsers.length > 0 && (
-                <div className="max-h-64 overflow-y-auto mt-1">
-                  {logUsers.map((u) => (
-                    <button
-                      key={u.id}
-                      onClick={() => setUserFilter(String(u.id))}
-                      title={`${u.name} (${u.roleLabel})`}
-                      className={cx("w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-right text-xs font-medium transition-colors mb-0.5", userFilter === String(u.id) ? "bg-primary text-white" : "hover:bg-secondary text-foreground")}
-                    >
-                      <span className="truncate flex-1 text-right">{u.name}</span>
-                      <span className={cx("text-[10px] flex-shrink-0", userFilter === String(u.id) ? "text-white/70" : "text-muted-foreground")}>{u.logCount.toLocaleString("fa-IR")}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </Card>
-          )}
+          <Card className="p-3">
+            <p className="text-xs font-semibold text-muted-foreground mb-2 px-1">فیلتر بر اساس کاربر</p>
+            <ActivityUserCombobox
+              value={userFilter}
+              onChange={setUserFilter}
+              users={logUsers}
+              systemCount={systemLogCount}
+              loading={logUsersLoading}
+            />
+          </Card>
         </div>
         <div className="flex-1">
           <Card className="overflow-hidden">
@@ -300,8 +275,5 @@ function ActivityLogPage({ csrfToken }: { csrfToken: string }) {
   );
 }
 
-// =============================================================================
-//  Settings
-// =============================================================================
 
 export { ActivityLogPage };

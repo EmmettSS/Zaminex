@@ -5,15 +5,15 @@ from django.utils import timezone
 
 
 class FollowUpType(models.TextChoices):
-    CALL = "Call", "Call"
-    MEETING = "Meeting", "Meeting"
-    EMAIL = "Email", "Email"
-    SITE_VISIT = "Site Visit", "Site Visit"
+    CALL = "Call", "تماس تلفنی"
+    MEETING = "Meeting", "جلسه حضوری"
+    EMAIL = "Email", "ارسال پیام/ایمیل"
+    SITE_VISIT = "Site Visit", "بازدید میدانی ملک"
 
 
 class FollowUpStatus(models.TextChoices):
-    SCHEDULED = "scheduled", "Scheduled"
-    COMPLETED = "completed", "Completed"
+    SCHEDULED = "scheduled", "برنامه‌ریزی‌شده"
+    COMPLETED = "completed", "تکمیل‌شده"
 
 
 class FollowUpQuerySet(models.QuerySet):
@@ -94,8 +94,6 @@ class FollowUp(models.Model):
     class Meta:
         verbose_name = "پیگیری"
         verbose_name_plural = "پیگیری‌ها"
-        # Newest activity first: most recently created or edited first, with
-        # the creation time as the tie-breaker.
         ordering = ["-updated_at", "-created_at"]
         indexes = [
             models.Index(fields=["consultant", "status"]),

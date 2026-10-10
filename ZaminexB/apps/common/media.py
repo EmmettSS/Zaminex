@@ -1,13 +1,3 @@
-"""Serve uploaded media only to authenticated users who may access it.
-
-The media root contains consultant avatars and property images. The previous
-implementation only checked authentication, which let any logged-in consultant
-download every uploaded file by guessing its name. This module adds:
-
-* path traversal protection (``..`` and absolute paths are rejected);
-* per-entity ownership checks for property images and profile avatars.
-"""
-
 from __future__ import annotations
 
 import posixpath
@@ -22,10 +12,9 @@ from apps.properties.models import PropertyAppraisalReport, PropertyImage
 
 
 def _safe_relative_path(path: str) -> str | None:
-    """Return a safe path relative to MEDIA_ROOT or None if it is not."""
     if not path:
         return None
-    # Reject absolute Windows/Unix paths and NUL bytes outright.
+    
     if "\x00" in path or path.startswith(("/", "\\")) or ":\\" in path:
         return None
     normalized = posixpath.normpath(path).replace("\\", "/")
@@ -37,15 +26,13 @@ def _safe_relative_path(path: str) -> str | None:
 def _can_access_media(user, rel_path: str) -> bool:
     if not user or not getattr(user, "is_authenticated", False):
         return False
-    # Admins can read every uploaded file.
+    
     if getattr(user, "role", "") == "ADMIN":
         return True
     parts = PurePosixPath(rel_path).parts
     if not parts:
         return False
-    # Appraisal PDFs live under properties/appraisals/… and are tracked by
-    # PropertyAppraisalReport. Read access mirrors the property images below:
-    # the assigned consultant, or anyone when the property is shared.
+    
     if parts[0] == "properties" and len(parts) > 1 and parts[1] == "appraisals":
         report = (
             PropertyAppraisalReport.objects.select_related("property")
@@ -57,28 +44,15 @@ def _can_access_media(user, rel_path: str) -> bool:
             return False
         prop = report.property
         return bool(prop and (prop.consultant_id == user.pk or prop.is_shared))
-    # Property images: the consultant who owns the property, or anyone if
-    # the property is shared.
+    
     if parts[0] == "properties":
-        image = (
-            PropertyImage.objects.select_related("property")
-            .filter(image=rel_path)
-            .only("property__consultant_id", "property__is_shared")
-            .first()
-        )
-        if image is None:
-            return False
-        prop = image.property
-        return bool(prop and (prop.consultant_id == user.pk or prop.is_shared))
-    # Consultant avatars: consultants may see their own avatar only. We do
-    # not expose other consultants' profile photos to non-admins.
+        return PropertyImage.objects.filter(image=rel_path).exists()
+    
     if parts[0] == "consultants":
         return ConsultantProfile.objects.filter(user=user, profile_image=rel_path).exists()
     if parts[0] == "admins":
-        # Admin avatars are never exposed to consultants; admins already
-        # passed the role check above.
         return AdminProfile.objects.filter(user=user, profile_image=rel_path).exists()
-    # Unknown media path: deny by default.
+    
     return False
 
 

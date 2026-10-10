@@ -3,21 +3,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .throttles import PasswordResetRateThrottle
+from .throttles import PasswordResetRateThrottle, ResilientScopedRateThrottle
 
 from .models import CompanySettings
 from .serializers import CompanySettingsSerializer
 
 
 class DistrictListView(APIView):
-    """Active district names, newest hierarchy first.
-
-    Kept for backwards compatibility: several screens still ask for a plain
-    list of neighbourhood names. It now reads from `basics.District` (the
-    Province → City → District hierarchy) and only falls back to the legacy
-    flat table while a deployment has not been migrated yet.
-    """
-
     def get(self, request):
         from apps.basics.models import District as HierarchyDistrict
 
@@ -27,8 +19,6 @@ class DistrictListView(APIView):
             .values_list("display_name", flat=True)
         )
         if names:
-            # De-duplicate while preserving order: the same neighbourhood name
-            # may legitimately exist in two different cities.
             seen, unique = set(), []
             for name in names:
                 if name not in seen:
@@ -41,11 +31,9 @@ class DistrictListView(APIView):
 
 
 class DistrictManageView(APIView):
-    """CRUD operations for districts (admin only)."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        """List all districts (including inactive)."""
         if getattr(request.user, "role", "") != "ADMIN":
             return Response({"detail": "فقط مدیر می‌تواند محله‌ها را مدیریت کند."}, status=status.HTTP_403_FORBIDDEN)
         
@@ -54,7 +42,6 @@ class DistrictManageView(APIView):
         return Response(DistrictSerializer(districts, many=True).data)
 
     def post(self, request):
-        """Create a new district."""
         if getattr(request.user, "role", "") != "ADMIN":
             return Response({"detail": "فقط مدیر می‌تواند محله‌ها را مدیریت کند."}, status=status.HTTP_403_FORBIDDEN)
         
@@ -70,7 +57,6 @@ class DistrictManageView(APIView):
         return Response(DistrictSerializer(district).data, status=status.HTTP_201_CREATED)
 
     def delete(self, request, pk=None):
-        """Delete a district."""
         if getattr(request.user, "role", "") != "ADMIN":
             return Response({"detail": "فقط مدیر می‌تواند محله‌ها را مدیریت کند."}, status=status.HTTP_403_FORBIDDEN)
         
@@ -82,7 +68,6 @@ class DistrictManageView(APIView):
             return Response({"detail": "محله یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
 
     def patch(self, request, pk=None):
-        """Update a district."""
         if getattr(request.user, "role", "") != "ADMIN":
             return Response({"detail": "فقط مدیر می‌تواند محله‌ها را مدیریت کند."}, status=status.HTTP_403_FORBIDDEN)
         
@@ -123,62 +108,13 @@ class CompanySettingsView(APIView):
         return self._update(request)
 
     
-class NotificationListView(APIView):
-    """Get notifications for the current user."""
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request):
-        from .models import Notification
-        
-        # Get notifications for the current user
-        notifications = Notification.objects.filter(user=request.user)[:50]
-        
-        data = []
-        for notif in notifications:
-            data.append({
-                "id": notif.id,
-                "type": notif.type,
-                "typeLabel": notif.get_type_display(),
-                "title": notif.title,
-                "message": notif.message,
-                "isRead": notif.is_read,
-                "createdAt": notif.created_at.isoformat(),
-                "metadata": notif.metadata,
-            })
-        
-        # Count unread
-        unread_count = Notification.objects.filter(user=request.user, is_read=False).count()
-        
-        return Response({
-            "notifications": data,
-            "unreadCount": unread_count,
-        })
-
-
-class NotificationMarkReadView(APIView):
-    """Mark a notification as read."""
-    permission_classes = [permissions.IsAuthenticated]
-
-    def post(self, request, pk=None):
-        from .models import Notification
-        
-        try:
-            notif = Notification.objects.get(pk=pk, user=request.user)
-            notif.is_read = True
-            notif.save()
-            return Response({"success": True})
-        except Notification.DoesNotExist:
-            return Response({"error": "اعلان یافت نشد"}, status=404)
-
-
 class PasswordResetRequestView(APIView):
-    """Request password reset - creates notification for admins."""
     permission_classes = [permissions.AllowAny]
     throttle_classes = [PasswordResetRateThrottle]
 
     def post(self, request):
         from django.contrib.auth import get_user_model
-        from .models import Notification
+        from apps.notifications.models import Notification
         
         User = get_user_model()
         username = request.data.get("username", "").strip()
@@ -189,10 +125,8 @@ class PasswordResetRequestView(APIView):
         try:
             user = User.objects.get(username=username)
         except User.DoesNotExist:
-            # Don't reveal if user exists or not
             return Response({"success": True, "message": "درخواست شما ثبت شد"})
         
-        # Create notification for all admins
         admins = User.objects.filter(role="ADMIN")
         for admin in admins:
             Notification.objects.create(
@@ -207,13 +141,6 @@ class PasswordResetRequestView(APIView):
 
 
 class LoginStatsView(APIView):
-    """Public, real-time counters shown on the login screen.
-
-    The login page is public, so no authentication is required. Only aggregate
-    counts are exposed — no rows, names, or personal data — which is safe to
-    serve before the user signs in. Each figure is a single cheap, indexed
-    COUNT query, so the login screen always reflects the live business state.
-    """
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
@@ -222,17 +149,13 @@ class LoginStatsView(APIView):
         from apps.properties.models import Property
 
         return Response({
-            # Non-archived properties currently under management.
             "totalProperties": Property.active_objects.count(),
-            # Active consultant accounts.
             "activeConsultants": ConsultantProfile.objects.filter(
                 is_active=True, user__role=UserRole.AGENT
             ).count(),
-            # Deals closed: properties marked SOLD.
             "soldProperties": Property.objects.filter(
                 status=Property.Status.SOLD
             ).count(),
-            # Currently published listings.
             "activeListings": Listing.objects.filter(
                 status=Listing.Status.ACTIVE
             ).count(),
@@ -240,16 +163,14 @@ class LoginStatsView(APIView):
 
 
 class AdminPasswordChangeView(APIView):
-    """Admin changes user password - creates notifications."""
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, user_id=None):
         from django.contrib.auth import get_user_model
-        from .models import Notification
+        from apps.notifications.models import Notification
         
         User = get_user_model()
         
-        # Check if user is admin
         if getattr(request.user, "role", "") != "ADMIN":
             return Response({"error": "فقط مدیران می‌توانند رمز عبور را تغییر دهند"}, status=403)
         
@@ -270,11 +191,9 @@ class AdminPasswordChangeView(APIView):
         except User.DoesNotExist:
             return Response({"error": "کاربر یافت نشد"}, status=404)
         
-        # Change password
         target_user.set_password(new_password)
         target_user.save()
         
-        # Create notification for all admins
         admins = User.objects.filter(role="ADMIN")
         admin_name = request.user.get_full_name() or request.user.username
         target_name = target_user.get_full_name() or target_user.username
@@ -288,7 +207,6 @@ class AdminPasswordChangeView(APIView):
                 metadata={"changed_user_id": target_user.id, "changed_by_id": request.user.id}
             )
         
-        # Create notification for the target user
         Notification.objects.create(
             user=target_user,
             type=Notification.NotificationType.PASSWORD_CHANGED,
@@ -298,3 +216,44 @@ class AdminPasswordChangeView(APIView):
         )
         
         return Response({"success": True, "message": "رمز عبور با موفقیت تغییر کرد"})
+
+
+class GeocodeView(APIView):
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ResilientScopedRateThrottle]
+    throttle_scope = "geocode"
+
+    def get(self, request):
+        from django.conf import settings
+
+        from .geocode import GeocodeUnavailable, clean_viewbox, geocode
+
+        query = (request.query_params.get("q") or "").strip()
+        max_length = int(getattr(settings, "GEOCODE_MAX_QUERY_LENGTH", 200))
+        if not query:
+            return Response(
+                {"detail": "عبارت جستجوی مکان نمی‌تواند خالی باشد."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(query) > max_length:
+            return Response(
+                {"detail": f"عبارت جستجو نباید بیشتر از {max_length} نویسه باشد."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        viewbox = clean_viewbox(request.query_params.get("viewbox"))
+        if request.query_params.get("viewbox") and viewbox is None:
+            return Response(
+                {"detail": "محدودهٔ جغرافیایی معتبر نیست."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        bounded = request.query_params.get("bounded") in {"1", "true", "yes"}
+
+        try:
+            results = geocode(query, viewbox, bounded)
+        except GeocodeUnavailable:
+            return Response(
+                {"detail": "سرویس جستجوی مکان در دسترس نیست؛ کمی دیگر دوباره تلاش کنید."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(results)

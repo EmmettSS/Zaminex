@@ -1,11 +1,3 @@
-"""Tests for the endpoints behind the attributes-management screen (phase 3).
-
-The API existed since phase 2 but nothing consumed it; adding the panel exposed
-three gaps that are covered here: options could be created but never removed,
-and both attributes and options demanded a system key the UI has no way to ask
-for.
-"""
-
 import io
 
 from django.contrib.auth import get_user_model
@@ -23,12 +15,12 @@ from apps.basics.models import (
 )
 from apps.properties.models import Property, PropertyAttributeValue
 
+from apps.common.testing import CacheClearingMixin
+
 User = get_user_model()
 
 
 class AttributeCreationTests(TestCase):
-    """The panel sends a Persian label and nothing else."""
-
     @classmethod
     def setUpTestData(cls):
         call_command("seed_basics", stdout=io.StringIO())
@@ -61,7 +53,6 @@ class AttributeCreationTests(TestCase):
         self.assertEqual(response.json()["name"], "custom_key")
 
     def test_a_duplicate_label_is_rejected(self):
-        """Two attributes with one label are indistinguishable in the list."""
         self.client.post(
             "/basics/api/attributes/",
             {"displayName": "تکراری", "dataType": "text"},
@@ -76,7 +67,6 @@ class AttributeCreationTests(TestCase):
         self.assertIn("displayName", response.json())
 
     def test_generated_keys_do_not_collide(self):
-        """Distinct labels that slugify alike must still both save."""
         first = self.client.post(
             "/basics/api/attributes/",
             {"displayName": "نما", "dataType": "text"},
@@ -192,7 +182,6 @@ class AttributeOptionTests(TestCase):
         self.assertFalse(AttributeOption.objects.filter(pk=option_id).exists())
 
     def test_an_option_in_use_cannot_be_deleted(self):
-        """Removing it would leave stored records showing a raw key."""
         created = self._add("کامپوزیت").json()
         agent = User.objects.create_user(username="holder", password="pw", role="AGENT")
         prop = Property.objects.create(
@@ -232,9 +221,7 @@ class AttributeOptionTests(TestCase):
         )
 
 
-class BindingPanelTests(TestCase):
-    """What the "اتصال به انواع" tab does."""
-
+class BindingPanelTests(CacheClearingMixin, TestCase):
     @classmethod
     def setUpTestData(cls):
         call_command("seed_basics", stdout=io.StringIO())
@@ -267,7 +254,6 @@ class BindingPanelTests(TestCase):
         self.assertIn(self.attribute.pk, [row["attribute"] for row in listed])
 
     def test_a_new_binding_reaches_the_property_form(self):
-        """The whole point of the screen: configure once, form follows."""
         self.client.post(
             "/basics/api/property-type-attributes/",
             {
@@ -493,8 +479,6 @@ class BindingPanelTests(TestCase):
 
 
 class AttributeListingTests(TestCase):
-    """Filters the panel relies on."""
-
     @classmethod
     def setUpTestData(cls):
         call_command("seed_basics", stdout=io.StringIO())
@@ -506,7 +490,6 @@ class AttributeListingTests(TestCase):
         self.client.force_login(self.admin)
 
     def test_all_shows_deactivated_attributes_too(self):
-        """The panel needs them so an operator can switch one back on."""
         attribute = Attribute.objects.filter(is_core=False).first()
         attribute.is_active = False
         attribute.save()
@@ -530,3 +513,120 @@ class AttributeListingTests(TestCase):
         rows = self.client.get("/basics/api/attributes/?all=1").json()
         area = next(a for a in rows if a["name"] == "area")
         self.assertTrue(area["isCore"])
+
+
+class AttributeDeleteTests(CacheClearingMixin, TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        call_command("seed_basics", stdout=io.StringIO())
+        cls.admin = User.objects.create_user(
+            username="del-admin", password="pw", role="ADMIN"
+        )
+        cls.apartment = PropertyType.objects.get(name="apartment")
+        cls.sale = DealType.objects.get(name="sale")
+
+    def setUp(self):
+        self.client.force_login(self.admin)
+
+    def test_core_attribute_delete_is_refused(self):
+        core = Attribute.objects.filter(is_core=True).first()
+        response = self.client.delete(f"/basics/api/attributes/{core.pk}/")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()[0],
+            "ویژگی‌های ثابت به ستون‌های پایگاه داده متصل هستند و قابل حذف نیستند.",
+        )
+        self.assertTrue(Attribute.all_objects.filter(pk=core.pk).exists())
+
+    def test_bound_attribute_delete_is_refused_with_new_guard(self):
+        attr = Attribute.objects.create(
+            name="bound_attr", display_name="ویژگی متصل", data_type="text",
+            entity=Attribute.Entity.PROPERTY,
+        )
+        PropertyTypeAttribute.objects.create(
+            property_type=self.apartment, attribute=attr, sort_order=50
+        )
+        response = self.client.delete(f"/basics/api/attributes/{attr.pk}/")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()[0],
+            "این ویژگی به 1 نوع متصل است؛ ابتدا اتصالات را حذف کنید.",
+        )
+        
+        self.assertIsNone(Attribute.all_objects.get(pk=attr.pk).deleted_at)
+        self.assertTrue(PropertyTypeAttribute.objects.filter(attribute=attr).exists())
+
+    def test_bound_attribute_guard_counts_all_active_bindings(self):
+        attr = Attribute.objects.create(
+            name="multi_bound", display_name="ویژگی چندمتصل", data_type="text",
+            entity=Attribute.Entity.PROPERTY,
+        )
+        PropertyTypeAttribute.objects.create(
+            property_type=self.apartment, attribute=attr, sort_order=10
+        )
+        
+        land = PropertyType.objects.create(
+            name="land_del", display_name="زمین حذف",
+            property_usage=self.apartment.property_usage, sort_order=99,
+        )
+        PropertyTypeAttribute.objects.create(
+            property_type=land, attribute=attr, sort_order=20
+        )
+        response = self.client.delete(f"/basics/api/attributes/{attr.pk}/")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()[0],
+            "این ویژگی به 2 نوع متصل است؛ ابتدا اتصالات را حذف کنید.",
+        )
+
+    def test_unbound_non_core_attribute_soft_deletes_and_leaves_the_list(self):
+        attr = Attribute.objects.create(
+            name="unbound_attr", display_name="ویژگی آزاد", data_type="text",
+            entity=Attribute.Entity.PROPERTY,
+        )
+        response = self.client.delete(f"/basics/api/attributes/{attr.pk}/")
+        self.assertEqual(response.status_code, 204)
+        
+        row = Attribute.all_objects.get(pk=attr.pk)
+        self.assertIsNotNone(row.deleted_at)
+        self.assertFalse(row.is_active)
+        self.assertNotIn(
+            attr.pk,
+            [a["id"] for a in self.client.get("/basics/api/attributes/?all=1").json()],
+        )
+
+    def test_unbound_attribute_can_be_restored(self):
+        attr = Attribute.objects.create(
+            name="restorable", display_name="قابل بازیابی", data_type="text",
+            entity=Attribute.Entity.PROPERTY,
+        )
+        self.client.delete(f"/basics/api/attributes/{attr.pk}/")
+        response = self.client.post(f"/basics/api/attributes/{attr.pk}/restore/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(Attribute.all_objects.get(pk=attr.pk).deleted_at)
+
+
+class AttributeAddThenListTests(CacheClearingMixin, TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        call_command("seed_basics", stdout=io.StringIO())
+        cls.admin = User.objects.create_user(
+            username="addlist-admin", password="pw", role="ADMIN"
+        )
+
+    def setUp(self):
+        self.client.force_login(self.admin)
+
+    def test_created_attribute_id_is_present_in_the_all_list(self):
+        created = self.client.post(
+            "/basics/api/attributes/",
+            {"displayName": "ویژگی تازه", "dataType": "text", "entity": "property"},
+            content_type="application/json",
+        )
+        self.assertEqual(created.status_code, 201, created.content[:300])
+        new_id = created.json()["id"]
+        self.assertIsNotNone(new_id)
+
+        everything = self.client.get("/basics/api/attributes/?all=1")
+        self.assertEqual(everything.status_code, 200)
+        self.assertIn(new_id, [a["id"] for a in everything.json()])

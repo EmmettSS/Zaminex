@@ -1,9 +1,11 @@
-"""Model-level tests for the reference data and the attribute engine."""
-
 from decimal import Decimal
+from unittest import mock
 
 from django.core.exceptions import ValidationError
+from django.db.models.signals import post_delete
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
+from django.db import connection
 
 from apps.basics.models import (
     Attribute,
@@ -35,11 +37,6 @@ class SoftDeleteTests(TestCase):
         )
 
     def test_name_can_be_reused_after_soft_delete(self):
-        """The unique index only covers live rows.
-
-        A plain `unique=True` would make this fail against a row the user can
-        no longer see.
-        """
         self.usage.delete()
         recreated = PropertyUsage.objects.create(
             name="residential", display_name="مسکونی (جدید)"
@@ -65,6 +62,88 @@ class SoftDeleteTests(TestCase):
         PropertyUsage.objects.all().delete()
         self.assertEqual(PropertyUsage.objects.count(), 0)
         self.assertEqual(PropertyUsage.all_objects.count(), 1)
+
+
+class SoftDeleteSignalTests(TestCase):
+    def setUp(self):
+        self.usage = PropertyUsage.objects.create(
+            name="signal-usage", display_name="کاربری سیگنال"
+        )
+        self.fired = []
+
+    def _watch(self, sender, instance, **kwargs):
+        self.fired.append(instance)
+
+    def test_queryset_delete_sends_post_delete(self):
+        post_delete.connect(self._watch, sender=PropertyUsage, dispatch_uid="sd-test")
+        try:
+            PropertyUsage.objects.filter(pk=self.usage.pk).delete()
+        finally:
+            post_delete.disconnect(dispatch_uid="sd-test", sender=PropertyUsage)
+        self.assertEqual([i.pk for i in self.fired], [self.usage.pk])
+
+    def test_the_emitted_instance_reflects_the_deletion(self):
+        post_delete.connect(self._watch, sender=PropertyUsage, dispatch_uid="sd-test")
+        try:
+            PropertyUsage.objects.filter(pk=self.usage.pk).delete()
+        finally:
+            post_delete.disconnect(dispatch_uid="sd-test", sender=PropertyUsage)
+        instance = self.fired[0]
+        self.assertIsNotNone(instance.deleted_at)
+        self.assertFalse(instance.is_active)
+        self.assertTrue(instance.is_deleted)
+
+    def test_a_bulk_delete_signals_every_row_once(self):
+        extra = [
+            PropertyUsage.objects.create(name=f"bulk-{i}", display_name=f"عمده {i}")
+            for i in range(3)
+        ]
+        post_delete.connect(self._watch, sender=PropertyUsage, dispatch_uid="sd-test")
+        try:
+            PropertyUsage.objects.filter(
+                pk__in=[self.usage.pk, *(u.pk for u in extra)]
+            ).delete()
+        finally:
+            post_delete.disconnect(dispatch_uid="sd-test", sender=PropertyUsage)
+        self.assertEqual(len(self.fired), 4)
+        self.assertEqual(len({i.pk for i in self.fired}), 4, "no duplicates")
+
+    def test_an_already_deleted_row_is_not_signalled_again(self):
+        self.usage.delete()
+        post_delete.connect(self._watch, sender=PropertyUsage, dispatch_uid="sd-test")
+        try:
+            PropertyUsage.all_objects.filter(pk=self.usage.pk).delete()
+        finally:
+            post_delete.disconnect(dispatch_uid="sd-test", sender=PropertyUsage)
+        self.assertEqual(self.fired, [])
+
+    def test_queryset_update_still_sends_nothing(self):
+        from django.db.models.signals import post_save
+
+        post_save.connect(self._watch, sender=PropertyUsage, dispatch_uid="sd-test")
+        try:
+            PropertyUsage.objects.filter(pk=self.usage.pk).update(display_name="عوض شد")
+        finally:
+            post_save.disconnect(dispatch_uid="sd-test", sender=PropertyUsage)
+        self.assertEqual(self.fired, [])
+
+    def test_the_reference_caches_are_dropped_by_a_queryset_delete(self):
+        from apps.common import cache_utils
+
+        key = cache_utils.make_key("catalog")
+        cache_utils.cache_set(key, {"seeded": True}, 120)
+        self.assertIsNotNone(cache_utils.cache_get(key))
+
+        PropertyUsage.objects.filter(pk=self.usage.pk).delete()
+        self.assertIsNone(cache_utils.cache_get(key))
+
+    def test_the_extra_select_is_skipped_when_nothing_is_listening(self):
+        with mock.patch.object(post_delete, "has_listeners", return_value=False):
+            with CaptureQueriesContext(connection) as ctx:
+                PropertyUsage.objects.filter(pk=self.usage.pk).delete()
+            statements = [q["sql"].lstrip().split()[0].upper() for q in ctx.captured_queries]
+        self.assertEqual(statements, ["UPDATE"])
+        self.assertTrue(PropertyUsage.all_objects.get(pk=self.usage.pk).is_deleted)
 
 
 class AttributeValidationTests(TestCase):
@@ -134,7 +213,6 @@ class AttributeBindingTests(TestCase):
         )
 
     def test_rooms_applies_to_apartment_but_not_to_land(self):
-        """The client's own example of type-scoped attributes."""
         PropertyTypeAttribute.objects.create(
             property_type=self.apartment, attribute=self.rooms, is_required=True
         )

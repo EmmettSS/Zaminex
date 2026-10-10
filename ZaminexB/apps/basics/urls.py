@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AttributeViewSet,
+    AttributeCategoryViewSet,
     BasicsCatalogView,
     CityViewSet,
     DistrictViewSet,
@@ -26,6 +27,11 @@ router.register(r"property-types", PropertyTypeViewSet, basename="property-type"
 router.register(r"deal-types", DealTypeViewSet, basename="deal-type")
 router.register(r"attributes", AttributeViewSet, basename="attribute")
 router.register(
+    r"attribute-categories",
+    AttributeCategoryViewSet,
+    basename="attribute-category",
+)
+router.register(
     r"property-type-attributes",
     PropertyTypeAttributeViewSet,
     basename="property-type-attribute",
@@ -38,11 +44,8 @@ router.register(r"cities", CityViewSet, basename="city")
 router.register(r"districts", DistrictViewSet, basename="district")
 
 urlpatterns = [
-    # Everything the dynamic forms need, in one call.
     path("catalog/", BasicsCatalogView.as_view(), name="catalog"),
-    # Provinces + cities + districts in one call, for the cascading selects.
     path("locations/", LocationTreeView.as_view(), name="location-tree"),
-    # Form / filter schemas.
     path(
         "schema/property-form/",
         PropertyFormSchemaView.as_view(),

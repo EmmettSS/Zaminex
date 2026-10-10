@@ -22,7 +22,7 @@ import { DistrictCombobox } from "../../../shared/components/ui/DistrictCombobox
 import { MultiPropertyCombobox } from "../../../shared/components/ui/MultiPropertyCombobox";
 import { MultiConsultantCombobox } from "../../../shared/components/ui/MultiConsultantCombobox";
 import { apiFetch, readJson, apiErrorMessage, getCsrfToken } from "../../../shared/lib/apiClient";
-import { toast, requiredFieldMsg } from "../../../shared/lib/utils";
+import { toast, requiredFieldMsg, normalizePriceDigits } from "../../../shared/lib/utils";
 import { DynamicAttributeFields } from "../../../shared/components/ui/DynamicAttributeFields";
 import { useBasicsCatalog, useAttributeSchema } from "../../../shared/lib/useAttributeSchema";
 import { DealTypeListCombobox } from "../../../shared/components/ui/DealTypeListCombobox";
@@ -68,16 +68,14 @@ function CreateListingWizard({
     priority: editingListing?.priority ? String(editingListing.priority) : "2",
     createdBy: editingListing?.created_by || "",
     assignedTo: editingListing?.assigned_to || "",
-    publish_channel: editingListing?.publish_channel || "WEBSITE", 
+    publish_channel: editingListing?.publishChannel || "WEBSITE", 
     start_date: editingListing?.start_date ? editingListing.start_date.split("T")[0] : "", 
     end_date: editingListing?.end_date ? editingListing.end_date.split("T")[0] : "",
     is_featured: editingListing?.is_featured || false,
-    // Deal type and money live on the listing: the same property can be
-    // advertised for sale and for rent at the same time.
     dealType: (editingListing as any)?.dealType ? String((editingListing as any).dealType) : "",
-    salePrice: (editingListing as any)?.salePrice ? String((editingListing as any).salePrice) : "",
-    deposit: (editingListing as any)?.deposit ? String((editingListing as any).deposit) : "",
-    monthlyRent: (editingListing as any)?.monthlyRent ? String((editingListing as any).monthlyRent) : "",
+    salePrice: normalizePriceDigits((editingListing as any)?.salePrice),
+    deposit: normalizePriceDigits((editingListing as any)?.deposit),
+    monthlyRent: normalizePriceDigits((editingListing as any)?.monthlyRent),
   });
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -95,9 +93,37 @@ function CreateListingWizard({
     requiredForStep(s).forEach((k) => {
       if (!String((form as Record<string, any>)[k] ?? "").trim()) errs[k] = requiredFieldMsg(REQUIRED_LABELS[k]);
     });
+    if (s === 2) {
+      const checkPositivePrice = (key: string, rawVal: any) => {
+        const str = String(rawVal ?? "").trim();
+        if (!str) return;
+        const cleaned = normalizePriceDigits(str);
+        if (!cleaned || Number(cleaned) <= 0) {
+          errs[key] = "مبلغ واردشده باید بیشتر از صفر باشد.";
+        }
+      };
+      if (showSalePrice) checkPositivePrice("salePrice", form.salePrice);
+      if (showDeposit) checkPositivePrice("deposit", form.deposit);
+      if (showRent) checkPositivePrice("monthlyRent", form.monthlyRent);
+      (schema?.fields ?? []).forEach((f) => {
+        if (f.inputType === "price" || Boolean(f.unit && f.unit.includes("تومان"))) {
+          checkPositivePrice(f.name, attributes[f.name]);
+        }
+      });
+    }
     setFieldErrors((prev) => {
       const next = { ...prev };
       requiredForStep(s).forEach((k) => { delete next[k]; });
+      if (s === 2) {
+        delete next.salePrice;
+        delete next.deposit;
+        delete next.monthlyRent;
+        (schema?.fields ?? []).forEach((f) => {
+          if (f.inputType === "price" || Boolean(f.unit && f.unit.includes("تومان"))) {
+            delete next[f.name];
+          }
+        });
+      }
       return { ...next, ...errs };
     });
     return Object.keys(errs).length === 0;
@@ -120,10 +146,6 @@ function CreateListingWizard({
     });
   }, [role, properties, currentConsultant, currentConsultantId]);
 
-  // In the "ایجاد آگهی" form only properties that are ready to be listed
-  // (وضعیت «آماده واگذاری» / AVAILABLE) may be selected. The currently
-  // selected property is kept so editing an existing listing doesn't break
-  // if it moved to another status.
   const listableProperties = useMemo(() => {
     const currentId = String(form.propertyId ?? "");
     return consultantProperties.filter((p) => {
@@ -147,8 +169,6 @@ function CreateListingWizard({
 
   const selectedProp = properties.find((p) => String(p.id) === String(form.propertyId));
 
-  // Deal types are administrator-managed, and each one decides which pricing
-  // and custom fields this form shows.
   const { catalog } = useBasicsCatalog(csrfToken);
   const { schema, loading: schemaLoading } = useAttributeSchema("listing", form.dealType, csrfToken);
   const [attributes, setAttributes] = useState<Record<string, any>>(
@@ -164,12 +184,12 @@ function CreateListingWizard({
     [catalog, form.dealType]
   );
 
-  // Which price inputs make sense depends on the deal: a sale has one figure,
-  // a rental has a deposit plus a monthly amount.
   const dealName = selectedDeal?.name ?? "";
-  const showSalePrice = ["sale", "presale", "exchange", "partnership"].includes(dealName);
   const showRent = dealName === "mortgage_rent";
   const showDeposit = dealName === "mortgage_rent" || dealName === "full_mortgage";
+  const showSalePrice =
+    ["sale", "presale", "exchange", "partnership"].includes(dealName) ||
+    (Boolean(dealName) && !showDeposit && !showRent);
 
   const ownerUserId = selectedProp?.consultantId ? String(selectedProp.consultantId) : "";
   const ownerProfile = consultants.find((c) => String(c.user?.id || c.id) === ownerUserId);
@@ -183,6 +203,9 @@ function CreateListingWizard({
 
   const handleFinish = async () => {
     if (!validateAllRequired()) return;
+    const cleanSalePrice = normalizePriceDigits(form.salePrice);
+    const cleanDeposit = normalizePriceDigits(form.deposit);
+    const cleanMonthlyRent = normalizePriceDigits(form.monthlyRent);
     const payload = {
       title: form.title,
       description: form.description,
@@ -190,14 +213,14 @@ function CreateListingWizard({
       priority: Number(form.priority),
       created_by: form.createdBy ? Number(form.createdBy) : undefined,
       assigned_to: form.assignedTo ? Number(form.assignedTo) : undefined,
-      publish_channel: form.publish_channel,
+      publishChannel: form.publish_channel,
       start_date: form.start_date || null,
       end_date: form.end_date || null,
       is_featured: form.is_featured,
       dealType: form.dealType ? Number(form.dealType) : null,
-      salePrice: showSalePrice && form.salePrice ? Number(form.salePrice) : null,
-      deposit: showDeposit && form.deposit ? Number(form.deposit) : null,
-      monthlyRent: showRent && form.monthlyRent ? Number(form.monthlyRent) : null,
+      salePrice: showSalePrice && cleanSalePrice && Number(cleanSalePrice) > 0 ? Number(cleanSalePrice) : null,
+      deposit: showDeposit && cleanDeposit && Number(cleanDeposit) > 0 ? Number(cleanDeposit) : null,
+      monthlyRent: showRent && cleanMonthlyRent && Number(cleanMonthlyRent) > 0 ? Number(cleanMonthlyRent) : null,
       attributes,
     };
 
@@ -215,7 +238,6 @@ function CreateListingWizard({
         <ChevronRight size={12} /><span className="text-foreground font-medium">{isEditMode ? "ویرایش آگهی" : "ساخت آگهی"}</span>
       </div>
 
-      {/* Step indicator */}
       <div className="flex items-center gap-0 mb-8">
         {labels.map((label, i) => {
           const n = i + 1; const done = n < step; const active = n === step;
@@ -275,13 +297,13 @@ function CreateListingWizard({
             {(showSalePrice || showDeposit || showRent) && (
               <div className="grid grid-cols-2 gap-4">
                 {showSalePrice && (
-                  <Input label="قیمت فروش (تومان)" type="number" placeholder="مبلغ به تومان" value={form.salePrice} onChange={(v) => set("salePrice", v)} />
+                  <Input label="قیمت فروش (تومان)" isPrice placeholder="مبلغ به تومان" value={form.salePrice} onChange={(v) => set("salePrice", v)} error={fieldErrors.salePrice} />
                 )}
                 {showDeposit && (
-                  <Input label={dealName === "mortgage_rent" ? "مبلغ ودیعه (تومان)" : "مبلغ رهن (تومان)"} type="number" placeholder="مبلغ به تومان" value={form.deposit} onChange={(v) => set("deposit", v)} />
+                  <Input label={dealName === "mortgage_rent" ? "مبلغ ودیعه (تومان)" : "مبلغ رهن (تومان)"} isPrice placeholder="مبلغ به تومان" value={form.deposit} onChange={(v) => set("deposit", v)} error={fieldErrors.deposit} />
                 )}
                 {showRent && (
-                  <Input label="اجاره ماهانه (تومان)" type="number" placeholder="مبلغ به تومان" value={form.monthlyRent} onChange={(v) => set("monthlyRent", v)} />
+                  <Input label="اجاره ماهانه (تومان)" isPrice placeholder="مبلغ به تومان" value={form.monthlyRent} onChange={(v) => set("monthlyRent", v)} error={fieldErrors.monthlyRent} />
                 )}
               </div>
             )}
@@ -362,8 +384,5 @@ function CreateListingWizard({
   );
 }
 
-// =============================================================================
-//  Listing Detail
-// =============================================================================
 
 export { CreateListingWizard };

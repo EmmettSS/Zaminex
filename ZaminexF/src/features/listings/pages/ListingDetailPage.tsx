@@ -68,7 +68,7 @@ function ListingDetailPage({
             <h1 className="text-lg font-bold">{listing.title}</h1>
             <div className="flex items-center gap-2 mt-1">
               {statusBadge(listing.status)}
-              <span className="text-xs text-muted-foreground">کانال: {toPersianChannel(listing.publish_channel)}</span>
+              <span className="text-xs text-muted-foreground">کانال: {toPersianChannel(listing.publishChannel)}</span>
             </div>
           </div>
           <div className="flex gap-2 flex-shrink-0">
@@ -116,7 +116,7 @@ function ListingDetailPage({
                   ["اولویت", listing.priority != null ? toPersianPriority(String(listing.priority)) : null],
                   ["آگهی ویژه", listing.is_featured === true ? "بله" : null],
                   ["وضعیت", listing.status ? toPersianListingStatus(listing.status) : null],
-                  ["کانال انتشار", listing.publish_channel ? toPersianChannel(listing.publish_channel) : null],
+                  ["کانال انتشار", listing.publishChannel ? toPersianChannel(listing.publishChannel) : null],
                   ["مشاور", consultantName || null],
                 ].filter(([, v]) => v !== null && v !== '').map(([k, v]) => (
                   <div key={k} className="p-3 bg-secondary rounded-xl"><p className="text-xs text-muted-foreground mb-1">{k}</p><p className="text-sm font-semibold">{v}</p></div>
@@ -141,8 +141,6 @@ function ListingDetailPage({
               
               const priceRows: { label: string; value: string; hint?: string }[] = [];
               
-              // نوع معامله
-              // price rows logic حرفه‌ای فارسی
               if (monthlyRent != null && monthlyRent !== '') {
                 priceRows.push({ 
                   label: "اجاره ماهانه", 
@@ -234,7 +232,7 @@ function ListingDetailPage({
                 {[
                   ["تاریخ شروع", listing.start_date ? new Date(listing.start_date).toLocaleDateString("fa-IR", { year: 'numeric', month: 'long', day: 'numeric' }) : null],
                   ["تاریخ پایان", listing.end_date ? new Date(listing.end_date).toLocaleDateString("fa-IR", { year: 'numeric', month: 'long', day: 'numeric' }) : null],
-                  ["کانال", listing.publish_channel ? toPersianChannel(listing.publish_channel) : null],
+                  ["کانال", listing.publishChannel ? toPersianChannel(listing.publishChannel) : null],
                   ["مشاور", consultantName || null],
                   ["تاریخ ایجاد آگهی", listing.created_at ? new Date(listing.created_at).toLocaleDateString("fa-IR", { year: 'numeric', month: 'long', day: 'numeric' }) : null],
                 ].filter(([, v]) => v !== null && v !== '').map(([k, v]) => (
@@ -287,8 +285,5 @@ function ListingDetailPage({
   );
 }
 
-// =============================================================================
-//  Tasks (Kanban, Calendar) — fully driven by the API
-// =============================================================================
 
 export { ListingDetailPage };

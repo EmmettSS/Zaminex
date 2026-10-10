@@ -1,10 +1,3 @@
-// =============================================================================
-//  App Router — complete stateful controller & orchestrator for the Zaminex frontend
-//  This preserves 100% of the state management, API integration, side effects,
-//  and callback handlers from App-old.tsx while utilizing the clean modular
-//  features/ and shared/ components.
-// =============================================================================
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
@@ -121,10 +114,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     initialData.pageProps?.properties || initialData.pageProps?.items || []);
   const [propertiesLoading, setPropertiesLoading] = useState(false);
   const [propertiesError, setPropertiesError] = useState<string | null>(null);
-  // All properties across the whole system, used only by the consultant
-  // "همه املاک" tab (fetched via scope=all). Kept separate from `properties`,
-  // which stays scoped to the current consultant (own + shared) everywhere else.
-  const [allProperties, setAllProperties] = useState<Property[]>([]);
+  const [locatedProperties, setLocatedProperties] = useState<Property[]>([]);
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [selectedProperty, setSelectedProperty] = useState<Property | undefined>(
     initialData.pageProps?.property
@@ -134,10 +124,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   const [propertyFormError, setPropertyFormError] = useState<string | null>(null);
   const [editingPropertyId, setEditingPropertyId] = useState<string | null>(null);
 
-  // ── Listings state ───────────────────────────────────────────────────
   const [listings, setListings] = useState<Listing[]>([]);
-  const [listingsLoading, setListingsLoading] = useState(false);
-  const [listingsError, setListingsError] = useState<string | null>(null);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
   const [selectedListing, setSelectedListing] = useState<Listing | undefined>(undefined);
   const [listingFormSubmitting, setListingFormSubmitting] = useState(false);
@@ -166,8 +153,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   const [tasksError, setTasksError] = useState<string | null>(null);
   const [taskSummary, setTaskSummary] = useState<{ total: number; pending: number; in_progress: number; completed: number; cancelled: number; overdue: number } | null>(null);
   const [taskTypesList, setTaskTypesList] = useState<Array<{ value: string; label: string }>>([]);
-  // Bumped whenever a task mutation changes the list, so "وظایف من"
-  // re-runs its server-filtered query.
   const [myTasksRefreshKey, setMyTasksRefreshKey] = useState(0);
   const bumpMyTasks = useCallback(() => setMyTasksRefreshKey((k) => k + 1), []);
 
@@ -239,16 +224,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     []
   );
 
-  // ── Expired session → warn, then return to the login page ────────────
-  // A tab left open past the idle timeout (or a logout performed in another
-  // tab) leaves the SPA authenticated on screen while every request fails.
-  // apiClient detects that centrally and calls back here, so the user gets one
-  // clear Persian message instead of a puzzling per-screen error, and a moment
-  // to read it before being sent to the login page.
-  //
-  // The handler is only installed for a signed-in page. On the login screen
-  // there is no session to expire, so redirecting there would just reload the
-  // page the user is already on.
   useEffect(() => {
     if (!initialData.isAuthenticated) return;
     onSessionExpired(() => {
@@ -260,12 +235,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     return () => onSessionExpired(null);
   }, [initialData.isAuthenticated, initialData.loginUrl]);
 
-  // ── Clear form errors when a create/edit form is closed ──────────────
-  // A submit error lives in App state (passed down as `submitError`), so it
-  // survives navigating away and would still be shown the next time the form
-  // opens. Drop it the moment we leave a form. The form's field data is local
-  // state and resets on unmount, so create forms open completely fresh while
-  // edit forms re-load their record from the backend.
   const prevPageRef = useRef<Page>(page);
   useEffect(() => {
     const prev = prevPageRef.current;
@@ -286,11 +255,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   }, [page]);
 
   // ── Authenticated-only data loading ──────────────────────────────────
-  // React runs every hook in this component before the `isAuthenticated`
-  // check further down decides to render the login screen instead of the
-  // shell. Any unguarded fetch therefore also fires on the login page, where
-  // it can only come back as 403 — so each loader below is gated on the
-  // session the server rendered the page with.
   const isAuthenticated = initialData.isAuthenticated;
 
   // ── Fetch Task Types from Backend ──────────────────────────────────────
@@ -357,8 +321,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     if (isAuthenticated) {
       fetchNotifications();
       fetchTicketUnreadCount();
-      // Refresh every 30 seconds so new tickets/replies surface in both the
-      // bell and the sidebar without requiring a full-page reload.
       const interval = setInterval(() => {
         fetchNotifications();
         fetchTicketUnreadCount();
@@ -367,27 +329,9 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     }
   }, [isAuthenticated, fetchNotifications, fetchTicketUnreadCount]);
 
-  // ── Listings API integration ────────────────────────────────────────
-  const fetchListings = useCallback(async () => {
-    setListingsLoading(true);
-    setListingsError(null);
-    try {
-      const res = await apiFetch("/listings/api/listings/?page_size=1000", { method: "GET" }, initialData.csrfToken);
-      if (!res.ok) throw new Error("خطا در دریافت لیست آگهی‌ها!");
-      const data = await res.json();
-      const items = Array.isArray(data) ? data : (data.results ?? []);
-      setListings(items);
-    } catch (error: any) {
-      setListingsError(error.message || "خطا در بارگذاری");
-    } finally {
-      setListingsLoading(false);
-    }
-  }, [initialData.csrfToken]);
-
-  useEffect(() => {
-    if (page !== "listings" && page !== "my-listings") return;
-    fetchListings();
-  }, [page, fetchListings]);
+  // ── Listings state ───────────────────────────────────────────────────
+  const listingsLoading = false;
+  const listingsError: string | null = null;
 
   useEffect(() => {
     if (page !== "listing-detail" || !selectedListingId) return;
@@ -458,59 +402,29 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
 
   const refreshDashboard = useCallback(async () => {
     try {
-      const [props, lres, fres, cres, tres, dashRes, actRes] = await Promise.allSettled([
-        apiFetch("/properties/api/properties/?page_size=1000", { method: "GET" }, initialData.csrfToken),
-        apiFetch("/listings/api/listings/?page_size=1000", { method: "GET" }, initialData.csrfToken),
-        apiFetch("/followupa/api/followups/", { method: "GET" }, initialData.csrfToken),
+      const [fres, cres, tres, dashRes, actRes] = await Promise.allSettled([
+        apiFetch("/followups/api/followups/", { method: "GET" }, initialData.csrfToken),
         apiFetch("/accounts/consultants/", { method: "GET" }, initialData.csrfToken),
         apiFetch("/tasks/api/tasks/summary/", { method: "GET" }, initialData.csrfToken),
         apiFetch("/common/api/analytics/dashboard/", { method: "GET" }, initialData.csrfToken),
         apiFetch("/common/api/activity-log/?page_size=6&days=30", { method: "GET" }, initialData.csrfToken),
       ]);
 
-      let totalProps = 0;
-      let activeListings = 0;
-      let openTasks = 0;
-      let followUpsDue = 0;
-      let consultantCount = 0;
-      let activeConsultantCount = 0;
-
-      if (props.status === "fulfilled" && props.value.ok) {
-        const data = await props.value.json();
-        const items = Array.isArray(data) ? data : (data.results ?? []);
-        // Use count if paginated, otherwise length
-        totalProps = Array.isArray(data) ? data.length : (data.count ?? items.length);
-        setProperties(items);
-      }
-
-      if (lres.status === "fulfilled" && lres.value.ok) {
-        const data = await lres.value.json();
-        const items = Array.isArray(data) ? data : (data.results ?? []);
-        // For active listings, if paginated, count may need separate logic, but use filtered length of fetched page + total count awareness
-        activeListings = items.filter((l: any) => l.status === "ACTIVE").length;
-        // If API returns count, and we fetched with large page_size, active count from items is okay for dashboard; for precise total active, backend could provide filtered count, but we keep simple
-        setListings(items);
-      }
-
       if (fres.status === "fulfilled" && fres.value.ok) {
         const data = await fres.value.json();
         const items = Array.isArray(data) ? data : (data.results ?? []);
-        followUpsDue = items.filter((f: any) => f.status === "scheduled").length;
         setFollowups(items);
       }
 
       if (cres.status === "fulfilled" && cres.value.ok) {
         const data = await cres.value.json();
         const items = Array.isArray(data) ? data : (data.results ?? []);
-        consultantCount = items.length;
-        activeConsultantCount = items.filter((c: any) => c.is_active).length;
         setConsultants(items);
       }
 
       if (tres.status === "fulfilled" && tres.value.ok) {
         const data = await tres.value.json();
         setTaskSummary(data);
-        openTasks = (data?.pending || 0) + (data?.in_progress || 0);
       }
 
       if (dashRes.status === "fulfilled" && dashRes.value.ok) {
@@ -521,13 +435,16 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
         setPropertyComposition(dash.propertyComposition || []);
         setHotProperties(dash.hotProperties || []);
         setMyReport(dash.myReport || null);
+        setLocatedProperties(dash.locatedProperties || []);
         if (dash.kpis) {
-          totalProps = dash.kpis.totalProperties ?? totalProps;
-          activeListings = dash.kpis.activeListings ?? activeListings;
-          openTasks = dash.kpis.openTasks ?? openTasks;
-          followUpsDue = dash.kpis.followUpsDue ?? followUpsDue;
-          consultantCount = dash.kpis.consultants ?? consultantCount;
-          activeConsultantCount = dash.kpis.consultantsActive ?? activeConsultantCount;
+          setDashboardKpis({
+            totalProperties: dash.kpis.totalProperties ?? 0,
+            activeListings: dash.kpis.activeListings ?? 0,
+            openTasks: dash.kpis.openTasks ?? 0,
+            followUpsDue: dash.kpis.followUpsDue ?? 0,
+            consultants: dash.kpis.consultants ?? 0,
+            consultantsActive: dash.kpis.consultantsActive ?? 0,
+          });
         }
       }
 
@@ -535,15 +452,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
         const actData = await actRes.value.json();
         setRecentActivities(actData.results || []);
       }
-
-      setDashboardKpis({
-        totalProperties: totalProps,
-        activeListings,
-        openTasks,
-        followUpsDue,
-        consultants: consultantCount,
-        consultantsActive: activeConsultantCount,
-      });
     } catch (err) {
       console.error("Failed to refresh dashboard:", err);
     }
@@ -586,8 +494,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   );
 
   // ── Follow-ups API integration ───────────────────────────────────────
-  // Bumped after every archive/delete/complete/create so the list page
-  // re-runs its (server-filtered) query.
   const [followupsRefreshKey, setFollowupsRefreshKey] = useState(0);
   const bumpFollowups = useCallback(() => setFollowupsRefreshKey((k) => k + 1), []);
 
@@ -596,7 +502,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     setFollowupsError(null);
 
     try {
-      const res = await apiFetch("/followupa/api/followups/", { method: "GET" }, initialData.csrfToken);
+      const res = await apiFetch("/followups/api/followups/", { method: "GET" }, initialData.csrfToken);
 
       if (!res.ok) throw new Error("خطا در دریافت پیگیری‌ها");
 
@@ -612,11 +518,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     }
   }, [initialData.csrfToken]);
 
-  // Server-side filtered fetch for the follow-ups list. Query params are
-  // built explicitly so type/consultant/property AND the Jalali→Gregorian
-  // scheduled-date range are all applied in the database (the consultant
-  // scope is enforced there too, never weakened). The dashboard widget keeps
-  // using the unfiltered `fetchFollowups` above.
   const loadFollowups = useCallback(
     async (filters: {
       type?: string;
@@ -633,7 +534,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
       if (filters.scheduledDateFrom) params.set("scheduledDateFrom", filters.scheduledDateFrom);
       if (filters.scheduledDateTo) params.set("scheduledDateTo", filters.scheduledDateTo);
       const res = await apiFetch(
-        `/followupa/api/followups/?${params.toString()}`,
+        `/followups/api/followups/?${params.toString()}`,
         { method: "GET" },
         initialData.csrfToken
       );
@@ -652,7 +553,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     setFollowupsError(null);
 
     try {
-      const res = await apiFetch("/followupa/api/followups/", { method: "POST", body: JSON.stringify(payload) }, initialData.csrfToken);
+      const res = await apiFetch("/followups/api/followups/", { method: "POST", body: JSON.stringify(payload) }, initialData.csrfToken);
 
       if (!res.ok) {
         const data = await res.json().catch(() => null);
@@ -672,7 +573,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
 
   const archiveFollowup = useCallback(async (id: string) => {
     try {
-      const res = await apiFetch(`/followupa/api/followups/${id}/archive/`, { method: "POST" }, initialData.csrfToken);
+      const res = await apiFetch(`/followups/api/followups/${id}/archive/`, { method: "POST" }, initialData.csrfToken);
       if (!res.ok) throw new Error("خطا در بایگانی پیگیری");
       toast({ type: "success", message: "پیگیری بایگانی شد." });
       await fetchFollowups(); bumpFollowups();
@@ -683,7 +584,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
 
   const deleteFollowup = useCallback(async (id: string) => {
     try {
-      const res = await apiFetch(`/followupa/api/followups/${id}/`, { method: "DELETE" }, initialData.csrfToken);
+      const res = await apiFetch(`/followups/api/followups/${id}/`, { method: "DELETE" }, initialData.csrfToken);
       if (!res.ok) throw new Error("خطا در حذف پیگیری");
       toast({ type: "success", message: "پیگیری حذف شد." });
       await fetchFollowups(); bumpFollowups();
@@ -694,7 +595,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
 
   const completeFollowup = useCallback(async (id: string, outcome: string, probability: number) => {
     try {
-      const res = await apiFetch(`/followupa/api/followups/${id}/`, {
+      const res = await apiFetch(`/followups/api/followups/${id}/`, {
         method: "PATCH",
         body: JSON.stringify({ status: "completed", outcome, probability }),
       }, initialData.csrfToken);
@@ -710,7 +611,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     setFollowupsLoading(true);
     setFollowupsError(null);
     try {
-      const res = await apiFetch(`/followupa/api/followups/${id}/`, {
+      const res = await apiFetch(`/followups/api/followups/${id}/`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       }, initialData.csrfToken);
@@ -752,8 +653,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     setCmdOpen(false);
   }, [followups]);
 
-  // The follow-ups list pages load their own server-filtered data via
-  // `loadFollowups`. Keep the unfiltered fetch for the dashboard widget only.
   useEffect(() => {
     if (page !== "consultant-dashboard" && page !== "admin-dashboard") return;
     fetchFollowups();
@@ -769,7 +668,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     const controller = new AbortController();
     (async () => {
       try {
-        const res = await apiFetch(`/followupa/api/followups/${selectedFollowupId}/`, { method: "GET", signal: controller.signal }, initialData.csrfToken);
+        const res = await apiFetch(`/followups/api/followups/${selectedFollowupId}/`, { method: "GET", signal: controller.signal }, initialData.csrfToken);
         if (res.ok) {
           const data = await res.json();
           setSelectedFollowup(data);
@@ -803,9 +702,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     fetchConsultants();
   }, [isAuthenticated, fetchConsultants]);
 
-  // Load the admin's own profile so the sidebar/topbar avatar and the
-  // "My Profile" screen reflect the admin account (admins are intentionally
-  // absent from the consultants list).
   const fetchAdminProfile = useCallback(async () => {
     try {
       const res = await apiFetch("/accounts/admins/me/", { method: "GET" }, initialData.csrfToken);
@@ -865,7 +761,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
         let data: any;
 
         if (hasImage) {
-          // Use FormData for file upload
           const formData = new FormData();
           if (payload.first_name) formData.append("first_name", payload.first_name);
           if (payload.last_name) formData.append("last_name", payload.last_name);
@@ -876,9 +771,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
           if (payload.notes !== undefined) formData.append("notes", payload.notes);
           formData.append("profile_image", payload.profile_image);
 
-          // apiFetch leaves the Content-Type to the browser for a FormData
-          // body, so the upload keeps its multipart boundary while still
-          // getting the shared CSRF retry and error translation.
           const res = await apiFetch(
             `/accounts/consultants/${id}/`,
             { method: "PATCH", body: formData },
@@ -890,7 +782,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
             throw new Error(apiErrorMessage(data, "خطا در ویرایش مشاور"));
           }
         } else {
-          // Use JSON for normal update
           const res = await apiFetch(
             `/accounts/consultants/${id}/`,
             { method: "PATCH", body: JSON.stringify(payload) },
@@ -940,13 +831,15 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     setPropertiesLoading(true);
     setPropertiesError(null);
     try {
-      // Use large page_size to get all for dashboard/KPIs; pagination-enabled endpoint returns count
-      const res = await apiFetch("/properties/api/properties/?page_size=1000", { method: "GET" }, initialData.csrfToken);
+      const res = await apiFetch(
+        "/properties/api/properties/options/",
+        { method: "GET", cache: "no-store" },
+        initialData.csrfToken
+      );
       if (!res.ok) throw new Error("خطا در دریافت لیست املاک");
-      const data = await res.json();
-      const items = Array.isArray(data) ? data : (data.results ?? []);
-      setProperties(items);
-      return items;
+      const all: Property[] = await res.json();
+      setProperties(all);
+      return all;
     } catch (error: any) {
       setPropertiesError(error.message || "خطا در بارگذاری");
       return [];
@@ -956,31 +849,26 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   }, [initialData.csrfToken]);
 
   useEffect(() => {
-    if (page !== "properties" && page !== "my-properties" && page !== "add-property" && page !== "edit-property" && page !== "create-followup" && page !== "edit-followup" && page !== "follow-ups") return;
+    const needsVisibleProperties = new Set([
+      "admin-dashboard",
+      "properties",
+      "add-property",
+      "edit-property",
+      "listings",
+      "my-listings",
+      "create-listing",
+      "edit-listing",
+      "tasks-kanban",
+      "create-task",
+      "tasks-calendar",
+      "follow-ups",
+      "my-followups",
+      "create-followup",
+      "edit-followup",
+    ]);
+    if (!needsVisibleProperties.has(page)) return;
     fetchProperties();
   }, [page, fetchProperties]);
-
-  // The consultant "همه املاک" tab needs every property in the system, which
-  // the scoped `properties` fetch never returns. Load it only when that tab is
-  // open so consultants keep a fast, role-scoped list everywhere else.
-  const fetchAllProperties = useCallback(async () => {
-    try {
-      const res = await apiFetch(
-        "/properties/api/properties/?scope=all&page_size=1000",
-        { method: "GET" },
-        initialData.csrfToken
-      );
-      if (!res.ok) return;
-      const data = await res.json();
-      setAllProperties(Array.isArray(data) ? data : (data.results ?? []));
-    } catch (error) {
-      console.error("Error fetching all properties:", error);
-    }
-  }, [initialData.csrfToken]);
-
-  useEffect(() => {
-    if (page === "all-properties") fetchAllProperties();
-  }, [page, fetchAllProperties]);
 
   useEffect(() => {
     const wantedId = page === "edit-property"
@@ -993,9 +881,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     const controller = new AbortController();
     async function loadDetail() {
       try {
-        // scope=all lets a consultant open the detail of any property in the
-        // system (view-only); mutating actions still resolve through the
-        // restricted queryset on the server.
         const scope = role === "consultant" ? "?scope=all" : "";
         const res = await apiFetch(`/properties/api/properties/${wantedId}/${scope}`, { method: "GET", signal: controller.signal }, initialData.csrfToken);
         if (res.ok) {
@@ -1033,7 +918,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
 
         setSelectedProperty(data);
         setSelectedPropertyId(String(data.id));
-        setEditingPropertyId(String(data.id));
+        setEditingPropertyId(null);
 
         setProperties((prev) => {
           const exists = prev.some((p) => String(p.id) === String(data.id));
@@ -1126,10 +1011,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     [initialData.csrfToken]
   );
 
-  // ── Appraisal report (گزارش کارشناسی) ────────────────────────────────
-  // One PDF per property: the server replaces the previous file on upload
-  // and removes it on delete; the fresh metadata is folded straight into
-  // the selected property so the tab re-renders without a refetch.
+  // ── Appraisal report ────────────────────────────────
   const uploadAppraisalReport = useCallback(
     async (propertyId: string, file: File) => {
       const formData = new FormData();
@@ -1192,15 +1074,21 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     }
   }, [initialData.csrfToken, fetchProperties]);
 
-  const deleteProperty = useCallback(async (id: string) => {
+  const deleteProperty = useCallback(async (id: string): Promise<boolean> => {
     try {
       const res = await apiFetch(`/properties/api/properties/${id}/`, { method: "DELETE" }, initialData.csrfToken);
-      if (!res.ok) throw new Error("خطا در حذف ملک");
+      if (!res.ok) {
+        const data = await readJson(res);
+        throw new Error(apiErrorMessage(data, "خطا در حذف ملک"));
+      }
       toast({ type: "success", message: "ملک حذف شد." });
+      setProperties((prev) => prev.filter((p) => String(p.id) !== String(id)));
       await fetchProperties();
       setPage("properties");
+      return true;
     } catch (err: any) {
       toast({ type: "error", message: err?.message || "خطای ناشناخته" });
+      return false;
     }
   }, [initialData.csrfToken, fetchProperties]);
 
@@ -1250,7 +1138,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
         const hasImage = payload.profile_image instanceof File;
 
         if (hasImage) {
-          // Use FormData for file upload
           const formData = new FormData();
           formData.append("first_name", payload.first_name || "");
           formData.append("last_name", payload.last_name || "");
@@ -1281,7 +1168,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
 
           return { ok: true, data };
         } else {
-          // Use JSON for normal submission
           const normalizedPayload = {
             first_name: payload.first_name,
             last_name: payload.last_name,
@@ -1326,17 +1212,11 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   );
 
   // ── Tasks API integration ────────────────────────────────────────────
-  // `filters` is forwarded as query params. The "وظایف من" screen sends its
-  // status + due-date range here so filtering runs in the database (where the
-  // (due_date, status) index lives) instead of on a client-side page slice.
-  // Other callers omit it and get the full role-scoped list for kanban etc.
   const fetchTasks = useCallback(async (filters?: { status?: string; dueDateFrom?: string; dueDateTo?: string }) => {
     setTasksLoading(true);
     setTasksError(null);
     try {
       const params = new URLSearchParams();
-      // Consultants only ever see their own tasks; ask the server to scope
-      // them so the response is already correct and index-friendly.
       if (role === "consultant" && currentConsultantId) {
         params.set("assignedTo", String(currentConsultantId));
       }
@@ -1431,25 +1311,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   }, [page, refreshDashboard]);
 
   // ── Page renderer ────────────────────────────────────────────────────
-
-  // The dashboard "پیگیری‌های پیش‌رو" widget shows five scheduled follow-ups:
-  // overdue ones first, then the newest activity (created or edited) — the
-  // same recency rule the follow-ups list page applies.
-  //
-  // The whole order is decided here, in one pass, for two reasons:
-  //
-  //  * Grouping has to happen BEFORE the list is cut to five. Slicing first
-  //    and grouping afterwards only reorders whichever five were touched most
-  //    recently, so a backlog of older overdue follow-ups never surfaced at
-  //    all — exactly the rows the widget exists to highlight.
-  //
-  //  * Equal timestamps need a deterministic tie-breaker. Records created or
-  //    edited in the same instant (a seeded database, a bulk import, quick
-  //    successive edits) compare equal on `updatedAt`, and the API is then
-  //    free to return them in any order. Without the `id` fallback the widget
-  //    reshuffled those rows on every refresh, which is the jumbled ordering
-  //    reported against this panel. The list page already breaks ties this
-  //    way; matching it keeps the two screens consistent.
   const upcomingFollowups = useMemo(() => {
     const activity = (f: FollowUp) =>
       new Date(f.updatedAt || f.createdAt || f.date || 0).getTime();
@@ -1472,7 +1333,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
   const renderPage = () => {
     switch (page) {
       case "admin-dashboard":
-        return <AdminDashboard kpis={dashboardKpis} navigate={navigate} onRefresh={refreshDashboard} topConsultants={topConsultants} recentActivities={recentActivities} tasks={tasks} upcomingFollowups={upcomingFollowups} revenueMonthly={revenueMonthly} revenueDealTypes={revenueDealTypes} propertyComposition={propertyComposition} hotProperties={hotProperties} properties={properties} onSaveTask={saveTask} onDeleteTask={deleteTask} />;
+        return <AdminDashboard kpis={dashboardKpis} navigate={navigate} onRefresh={refreshDashboard} topConsultants={topConsultants} recentActivities={recentActivities} tasks={tasks} upcomingFollowups={upcomingFollowups} revenueMonthly={revenueMonthly} revenueDealTypes={revenueDealTypes} propertyComposition={propertyComposition} hotProperties={hotProperties} located={locatedProperties} properties={properties} onSaveTask={saveTask} onDeleteTask={deleteTask} />;
       case "properties":
         return (
           <PropertiesPage
@@ -1786,7 +1647,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
           .then(data => setDistrictsList(data))
           .catch(() => {});
       }} />;
-      case "settings-workspace": case "settings-users": case "settings-permissions": return <SettingsPage page={page} navigate={navigate} role={role} csrfToken={initialData.csrfToken} />;
+      case "settings-workspace": case "settings-users": case "settings-permissions": case "settings-login-options": return <SettingsPage page={page} navigate={navigate} role={role} csrfToken={initialData.csrfToken} />;
       case "consultant-dashboard":
         return (
           <ConsultantDashboard
@@ -1795,15 +1656,16 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
             followups={followups}
             userName={userName}
             consultantId={currentConsultantId}
-            recentActivities={recentActivities}
-            onSaveTask={saveTask}
-            onDeleteTask={deleteTask}
-            myReport={myReport}
-            propertyComposition={propertyComposition}
-            kpis={{
-              properties: properties.filter(p => String(p.consultantId ?? p.consultant ?? "") === String(currentConsultantId)).length,
-              listings: listings.filter(l => l.status === "ACTIVE" && (String(l.assigned_to) === String(currentConsultantId) || String((l as any).created_by) === String(currentConsultantId))).length,
-              openTasks: tasks.filter(t => String(t.assigneeId) === String(currentConsultantId) && t.status !== "COMPLETED" && t.status !== "CANCELLED").length,
+              recentActivities={recentActivities}
+              onSaveTask={saveTask}
+              onDeleteTask={deleteTask}
+              myReport={myReport}
+              propertyComposition={propertyComposition}
+              located={locatedProperties}
+              kpis={{
+              properties: dashboardKpis.totalProperties,
+              listings: dashboardKpis.activeListings,
+              openTasks: dashboardKpis.openTasks,
             }}
           />
         );
@@ -1811,7 +1673,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
         return (
           <MyPropertiesPage
             navigate={navigate}
-            properties={properties}
+            consultants={consultants}
             consultantId={currentConsultantId}
             openPropertyDetail={openPropertyDetail}
             openPropertyEdit={openPropertyEdit}
@@ -1824,7 +1686,7 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
         return (
           <AllPropertiesPage
             navigate={navigate}
-            properties={allProperties}
+            consultants={consultants}
             consultantId={currentConsultantId}
             openPropertyDetail={openPropertyDetail}
             openPropertyEdit={openPropertyEdit}
@@ -1852,27 +1714,9 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     }
   };
 
-  // Logout is the app's only POST that navigates the browser, so it must be
-  // CSRF-proof in every browser state. The previous raw-form submit read the
-  // token from `document.cookie` and fell back to the page-rendered token;
-  // Django rotates the CSRF secret on every login, so a missing or stale
-  // cookie made the POST fail with a raw 403 page and no recovery path.
-  //
-  // The flow below:
-  //   1. refreshes the csrftoken cookie by hitting a CSRF-issuing page
-  //      (Django re-issues the cookie there), so the token we send and the
-  //      cookie the browser sends can never disagree;
-  //   2. logs out through the shared API client (X-CSRFToken header) — the
-  //      same mechanism every other write in the app uses. The server
-  //      answers with the redirect to the login page, which fetch follows;
-  //   3. navigates to the login page once the server-side session is gone.
   const handleLogout = () => {
     setLogoutConfirm(false);
 
-    // Tell the API client a logout is intentionally in progress so any
-    // background request that returns a 403 once the session is destroyed is
-    // not misread as an idle-timeout expiry (which would schedule a second
-    // redirect and make the login page appear to keep reloading).
     beginIntentionalLogout();
 
     void (async () => {
@@ -1880,8 +1724,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
       const loginUrl = initialData.loginUrl || "/accounts/login/";
 
       try {
-        // Step 1 — refresh the CSRF cookie. Non-fatal by design: the POST
-        // below has its own error handling if this call cannot complete.
         try {
           await fetch(loginUrl, {
             method: "GET",
@@ -1892,7 +1734,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
           // Proceed with the current token state.
         }
 
-        // Step 2 — log out exactly like any other API call in the app.
         const res = await apiFetch(logoutUrl, { method: "POST" });
 
         if (!res.ok) {
@@ -1904,8 +1745,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
           return;
         }
 
-        // Step 3 — the server-side session is already destroyed; land on the
-        // login page.
         window.location.assign(loginUrl);
       } catch {
         window.location.reload();
@@ -1913,8 +1752,6 @@ export default function AppRouter({ initialData }: { initialData: InitialData })
     })();
   };
 
-  // Avatar of the currently logged-in user: admins come from their own
-  // profile endpoint, consultants from the consultants list.
   const currentUserImageUrl = role === "admin"
     ? (adminProfile?.profile_image ?? null)
     : consultants.find((c) => String(c.user?.id || c.id) === String(currentConsultantId))?.profile_image;

@@ -11,24 +11,10 @@ from apps.common.fuzzy_search import apply_fuzzy_search
 from apps.common.pagination import StandardResultsSetPagination
 from apps.properties.models import Property
 from .models import Listing
-from .serializers import ListingSerializer
+from .serializers import ListingListSerializer, ListingSerializer
 
 
 def _sync_property_status_from_listings(listing):
-    """Keep the linked property's status consistent with its listings.
-
-    The sales chart only trusts listings with status=SOLD (not the property's
-    status), so this mirrors the listing state onto the property:
-
-    - If this listing is SOLD, the property is sold (deal closed).
-    - If this listing leaves SOLD, the property only stays SOLD when *another*
-      listing of the same property is still SOLD; otherwise it returns to
-      AVAILABLE. This guarantees that reopening a sold listing (e.g. setting it
-      back to ACTIVE) immediately removes the deal from the dashboard chart.
-
-    Runs inside ``select_for_update`` so two concurrent status changes cannot
-    race each other into a contradictory property status.
-    """
     property_id = getattr(listing, "property_id", None)
     if not property_id:
         return
@@ -62,28 +48,49 @@ class ListingViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = StandardResultsSetPagination
 
+    def get_serializer_class(self):
+        if self.action == "list":
+            return ListingListSerializer
+        return ListingSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if self.action == "list":
+            from apps.analytics.metrics import annotate_effective_prices
+
+            property_ids = set(
+                self.filter_queryset(self.get_queryset())
+                .values_list("property_id", flat=True)
+            )
+            context["effective_price_map"] = annotate_effective_prices(property_ids)
+        return context
+
     def get_queryset(self):
         user = self.request.user
         if user.role == "ADMIN":
             qs = Listing.objects.all().select_related(
                 'property', 'created_by', 'assigned_to', 'deal_type'
-            ).prefetch_related('property__images')
+            )
         else:
             qs = Listing.objects.filter(
                 Q(created_by=user) | Q(assigned_to=user)
-            ).select_related('property', 'created_by', 'assigned_to', 'deal_type').prefetch_related(
-                'property__images'
-            )
+            ).select_related('property', 'created_by', 'assigned_to', 'deal_type')
 
-        # List-only filters (hide SOLD, search, price …) must not
-        # apply to retrieve/update/actions. Otherwise opening a sold listing
-        # from the list returns 404 because the default list excludes SOLD.
+        if self.action == "list":
+            qs = qs.select_related(
+                'assigned_to__consultant_profile',
+                'created_by__consultant_profile',
+            ).prefetch_related(
+                'property__images',
+                'property__followups',
+                'property__tasks',
+            )
+        else:
+            qs = qs.prefetch_related('property__images')
+
         if getattr(self, "action", None) != "list":
             return qs.order_by("-created_at")
 
-        # --- common filters (server-side pagination) ----------------------
-        # Free-text search over the listing title and its property's title
-        # (and the listing id), delegated to the shared search helper.
         q = self.request.query_params.get("q")
         fuzzy_search_active = bool(q and q.strip())
         if q:
@@ -107,7 +114,6 @@ class ListingViewSet(viewsets.ModelViewSet):
                 ],
             )
 
-        # Status filter (ACTIVE, DRAFT, SOLD, etc)
         status_param = self.request.query_params.get("status")
         show_sold = self.request.query_params.get("show_sold") or self.request.query_params.get("showSold")
         include_sold = self.request.query_params.get("include_sold") or self.request.query_params.get("includeSold")
@@ -117,16 +123,10 @@ class ListingViewSet(viewsets.ModelViewSet):
         elif str(show_sold).lower() in ("true", "1"):
             qs = qs.filter(status=Listing.Status.SOLD)
         elif str(include_sold).lower() in ("true", "1"):
-            # Property-detail and similar scoped queries need every status,
-            # including SOLD, without flipping the default list behaviour.
             pass
         else:
-            # Default: hide SOLD listings unless specifically requested.
-            # ARCHIVED stays in the list (with its archived status) so
-            # archiving is not confused with delete.
             qs = qs.exclude(status=Listing.Status.SOLD)
 
-        # Consultant / assigned_to filter (admin only)
         consultant = self.request.query_params.get("consultant") or self.request.query_params.get("assigned_to")
         if consultant and user.role == "ADMIN":
             if str(consultant).isdigit():
@@ -134,7 +134,6 @@ class ListingViewSet(viewsets.ModelViewSet):
             else:
                 qs = apply_fuzzy_search(qs, consultant, ["assigned_to__username"])
 
-        # Property filter
         prop = self.request.query_params.get("property")
         if prop:
             if str(prop).isdigit():
@@ -142,7 +141,6 @@ class ListingViewSet(viewsets.ModelViewSet):
             else:
                 qs = apply_fuzzy_search(qs, prop, ["property__title"])
 
-        # Deal type filter
         deal_type = self.request.query_params.get("dealType") or self.request.query_params.get("deal_type")
         if deal_type:
             if str(deal_type).isdigit():
@@ -152,8 +150,6 @@ class ListingViewSet(viewsets.ModelViewSet):
                     qs, deal_type, ["deal_type__display_name", "deal_type__name"]
                 )
 
-        # Price range filters
-        # Rent (monthly_rent)
         rent_min = self.request.query_params.get("rentMin")
         rent_max = self.request.query_params.get("rentMax")
         if rent_min:
@@ -161,7 +157,6 @@ class ListingViewSet(viewsets.ModelViewSet):
         if rent_max:
             qs = qs.filter(monthly_rent__lte=rent_max)
 
-        # Deposit / ودیعه
         deposit_min = self.request.query_params.get("depositMin")
         deposit_max = self.request.query_params.get("depositMax")
         if deposit_min:
@@ -169,7 +164,6 @@ class ListingViewSet(viewsets.ModelViewSet):
         if deposit_max:
             qs = qs.filter(deposit__lte=deposit_max)
 
-        # Sale / Rahn - فروش و رهن یکی حساب می‌شود: sale_price یا deposit
         sale_min = self.request.query_params.get("saleMin")
         sale_max = self.request.query_params.get("saleMax")
         if sale_min or sale_max:
@@ -189,8 +183,6 @@ class ListingViewSet(viewsets.ModelViewSet):
                     Q(deposit__lte=sale_max)
                 )
 
-        # Preserve the relevance ordering from `apply_fuzzy_search` when a
-        # free-text search is active; otherwise keep newest-first.
         if fuzzy_search_active:
             return qs
         return qs.order_by("-created_at")
@@ -264,13 +256,6 @@ class ListingViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def set_status(self, request, pk=None):
-        """Set any listing status directly.
-
-        Available to admins and to the consultant who created the listing or is
-        assigned to it, so consultants can change the status like an admin.
-        Setting SOLD mirrors the status onto the related property; leaving SOLD
-        restores it to AVAILABLE when no other listing is still sold.
-        """
         listing = self.get_object()
         user = request.user
         if user.role != "ADMIN" and listing.created_by != user and listing.assigned_to != user:

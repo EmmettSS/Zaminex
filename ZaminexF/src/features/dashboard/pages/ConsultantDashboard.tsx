@@ -22,6 +22,8 @@ import { statusBadge } from "../../../shared/components/ui/StatusBadge";
 import { formatJalali, formatJalaliDT, formatJalaliDateTime } from "../../../shared/lib/jdate";
 import { TaskDetailModal } from "../../../shared/components/TaskDetailModal";
 import { PIE_COLORS, CHART_COLORS } from "../../../shared/lib/constants";
+import { PropertyDistributionMap, type DistributionPoint } from "../../../shared/components/ui/PropertyDistributionMap";
+import { STATUS_FA, STATUS_STYLE } from "../../../shared/components/ui/PropertyMarkerPopup";
 /** Radar axis labels sit outside the polygon, next to their own spoke. */
 function splitRadarLabel(value: string): string[] {
   const parts = value.trim().split(/\s+/).filter(Boolean);
@@ -80,7 +82,7 @@ function PerformanceRadarTick({
   );
 }
 
-function ConsultantDashboard({ navigate, tasks, followups, userName, consultantId, kpis, recentActivities = [], onSaveTask, onDeleteTask, myReport = null, propertyComposition = [] }: { 
+function ConsultantDashboard({ navigate, tasks, followups, userName, consultantId, kpis, recentActivities = [], onSaveTask, onDeleteTask, myReport = null, propertyComposition = [], located = [] }: { 
   navigate: (p: Page) => void; 
   tasks: any[]; 
   followups: FollowUp[]; 
@@ -92,6 +94,8 @@ function ConsultantDashboard({ navigate, tasks, followups, userName, consultantI
   onDeleteTask?: (id: string) => Promise<void>;
   myReport?: { kpis?: Record<string, any>; charts?: Record<string, any> } | null;
   propertyComposition?: Array<{ name: string; value: number; count: number; percentage: number }>;
+  
+  located?: Property[];
 }) {
   const [selectedTask, setSelectedTask] = useState<any | null>(null);
   const myTasks = tasks
@@ -115,6 +119,34 @@ function ConsultantDashboard({ navigate, tasks, followups, userName, consultantI
     ...m,
     label: m.label || m.month,
   }));
+  
+  const myLocated = useMemo<DistributionPoint[]>(
+    () =>
+      (located || [])
+        .filter((p) => String((p as any).consultantId ?? (p as any).consultant ?? "") === String(consultantId))
+        .filter((p) => p.latitude != null && p.longitude != null)
+        .map((p) => ({
+          id: p.id,
+          title: p.title,
+          lat: Number(p.latitude),
+          lng: Number(p.longitude),
+          status: String((p as any).propertyStatus || "").toUpperCase(),
+          area: Number(p.area || 0),
+          consultantId: ((p as any).consultantId ?? null) as string | number | null,
+          consultantName: ((p as any).consultantName as string) || userName,
+        })),
+    [located, consultantId, userName]
+  );
+
+  const statusLegend = useMemo(() => {
+    const order = ["AVAILABLE", "RESERVED", "SOLD", "INACTIVE"];
+    const counts = new Map<string, number>();
+    myLocated.forEach((p) => counts.set(p.status, (counts.get(p.status) || 0) + 1));
+    return order
+      .filter((st) => counts.has(st))
+      .map((st) => ({ status: st, count: counts.get(st) || 0 }));
+  }, [myLocated]);
+
   const hasMonthly = monthly.some((m: any) => (m.tasksCompleted || 0) + (m.followups || 0) + (m.listings || 0) > 0);
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -182,6 +214,31 @@ function ConsultantDashboard({ navigate, tasks, followups, userName, consultantI
           )}
         </Card>
       </div>
+      <Card className="p-5">
+        <div className="mb-4">
+          <h2 className="text-sm font-semibold">نقشه توزیع املاک</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">موقعیت جغرافیایی املاک واگذارشده به {userName} روی نقشه؛ رنگ نشانگر بر اساس وضعیت ملک است.</p>
+        </div>
+        {myLocated.length === 0 ? (
+          <p className="py-10 text-center text-xs text-muted-foreground">هنوز موقعیت جغرافیایی ملکی برای شما ثبت نشده است.</p>
+        ) : (
+          <>
+            <PropertyDistributionMap points={myLocated} colorMode="status" badgeLabel="نقشهٔ املاک من" />
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {statusLegend.map(({ status, count }) => {
+                const st = STATUS_STYLE[status];
+                return (
+                  <span key={status} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span className={`w-2.5 h-2.5 rounded-full ${st ? st.dot : "bg-slate-400"}`} />
+                    {STATUS_FA[status] || "—"}
+                    <span className="font-semibold text-foreground/70">{count.toLocaleString("fa-IR")}</span>
+                  </span>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </Card>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-4">
           <Card className="p-5">

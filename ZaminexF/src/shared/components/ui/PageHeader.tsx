@@ -12,8 +12,5 @@ function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: st
   );
 }
 
-// =============================================================================
-//  Admin Dashboard
-// =============================================================================
 
 export { PageHeader };

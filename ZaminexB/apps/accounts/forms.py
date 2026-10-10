@@ -12,8 +12,6 @@ from .models import UserRole
 
 User = get_user_model()
 
-# Shown on the login page when an archived (deactivated) consultant
-# tries to log in, and when the session middleware bounces them out.
 INACTIVE_ACCOUNT_MESSAGE = (
     "حساب کاربری شما غیرفعال شده است. برای اطلاع از دلیل آن و بازیابی دسترسی، "
     "با مدیریت مجموعه تماس بگیرید."
@@ -25,20 +23,6 @@ SMS_LOGIN_REQUIRED_MESSAGE = (
 
 
 class ZaminexAuthenticationForm(AuthenticationForm):
-    """Login form with Persian errors, consultant activation checks and lockout.
-
-    Five failed password checks for the same normalized username within the
-    configured window temporarily block login with that username. The lock is
-    account-scoped (not only IP-scoped), is persisted in the database, and is
-    cleared after a successful login.
-
-    ``enforce_login_method`` gates password login on the admin's global
-    «گزینه‌های ورود» switch: when SMS is active, the password path is rejected
-    here so the choice is enforced server-side, not just hidden in the UI.
-    """
-
-    # Disabled by ZaminexAdminAuthenticationForm so the Django admin login
-    # (the superuser's recovery surface) always keeps accepting a password.
     enforce_login_method = True
 
     error_messages = {
@@ -65,8 +49,8 @@ class ZaminexAuthenticationForm(AuthenticationForm):
         password = self.cleaned_data.get("password")
 
         if self.enforce_login_method:
-            from .sms import active_login_method
             from .models import LoginMethod
+            from .sms import active_login_method
 
             if active_login_method() == LoginMethod.SMS:
                 raise ValidationError(
@@ -123,13 +107,6 @@ class ZaminexAuthenticationForm(AuthenticationForm):
 
 
 class ZaminexAdminAuthenticationForm(ZaminexAuthenticationForm):
-    """Django admin login: same lockout, and only ADMIN staff may enter.
-
-    The «گزینه‌های ورود» switch is deliberately *not* enforced here: /admin/
-    is the superuser's recovery surface, so it always keeps accepting a
-    password even when the CRM itself is set to SMS-only.
-    """
-
     enforce_login_method = False
 
     def confirm_login_allowed(self, user):

@@ -19,7 +19,7 @@ import { PropertyCombobox } from "../../../shared/components/ui/PropertyCombobox
 import { ConsultantCombobox } from "../../../shared/components/ui/ConsultantCombobox";
 import { DistrictCombobox } from "../../../shared/components/ui/DistrictCombobox";
 import { apiFetch, readJson, apiErrorMessage, getCsrfToken } from "../../../shared/lib/apiClient";
-import { toast, requiredFieldMsg } from "../../../shared/lib/utils";
+import { toast, requiredFieldMsg, validateCoordinatePair, ownerPhoneError, normalizePhone } from "../../../shared/lib/utils";
 import { DynamicAttributeFields } from "../../../shared/components/ui/DynamicAttributeFields";
 import { LocationSelect, useLocationTree, findLocationPath } from "../../../shared/components/ui/LocationSelect";
 import { PropertyMapPicker } from "../../../shared/components/ui/PropertyMapPicker";
@@ -79,13 +79,9 @@ function EditPropertyWizard({
   const labels = ["اطلاعات پایه", "جزئیات", "موقعیت", "بررسی"];
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // Property types are administrator-managed, and each one decides which custom
-  // fields appear below.
   const { catalog } = useBasicsCatalog(csrfToken);
   const { tree: locationTree } = useLocationTree(csrfToken);
 
-  // The property stores only the district; derive the province and city above
-  // it once the tree arrives so all three dropdowns show the saved value.
   useEffect(() => {
     if (!locationTree.length || !form.districtId) return;
     if (form.provinceId && form.cityId) return;
@@ -99,7 +95,6 @@ function EditPropertyWizard({
     clearFieldError(name);
   };
 
-  // Load the values already stored against this property.
   useEffect(() => {
     const stored = (existing as any)?.attributes;
     if (stored && typeof stored === "object") setAttributes(stored);
@@ -181,6 +176,11 @@ function EditPropertyWizard({
     requiredForStep(s).forEach((k) => {
       if (!String((form as Record<string, any>)[k] ?? "").trim()) errs[k] = requiredFieldMsg(REQUIRED_LABELS[k]);
     });
+    
+    if (s === 1) {
+      const phoneErr = ownerPhoneError(form.ownerPhone);
+      if (phoneErr) errs["ownerPhone"] = phoneErr;
+    }
     setFieldErrors((prev) => {
       const next = { ...prev };
       requiredForStep(s).forEach((k) => { delete next[k]; });
@@ -239,6 +239,21 @@ function EditPropertyWizard({
     });
   }, [existing]);
 
+  const [coordError, setCoordError] = useState<string | null>(null);
+  const handleConfirmCoordinates = () => {
+    const result = validateCoordinatePair(form.latitude, form.longitude);
+    if (result.state === "empty") {
+      setCoordError("برای تایید، هر دو مختصات را وارد کنید یا موقعیت را از روی نقشه انتخاب کنید.");
+      return;
+    }
+    if (result.state === "invalid") {
+      setCoordError(result.error);
+      return;
+    }
+    setCoordError(null);
+    setForm((p) => ({ ...p, latitude: String(result.value[0]), longitude: String(result.value[1]) }));
+  };
+
   const mapFormToPayload = () => ({
     title: form.title,
     internalCode: form.internalCode,
@@ -255,7 +270,7 @@ function EditPropertyWizard({
     consultant: form.consultant || undefined,
     ownerFirstName: form.ownerFirstName,
     ownerLastName: form.ownerLastName,
-    ownerPhone: form.ownerPhone,
+    ownerPhone: normalizePhone(form.ownerPhone),
     attributes: Object.fromEntries(Object.entries(attributes).filter(([k]) => schemaNames.has(k))),
   });
 
@@ -265,6 +280,7 @@ function EditPropertyWizard({
     const result = await onSubmit(mapFormToPayload(), propertyId);
     if (result?.ok) {
       toast({ type: "success", message: "تغییرات با موفقیت ذخیره شد." });
+      navigate("property-detail");
     }
   };
 
@@ -387,12 +403,30 @@ function EditPropertyWizard({
               required
             />
             <Input label="آدرس کامل" value={form.fullAddress} onChange={(v) => set("fullAddress", v)} error={fieldErrors.fullAddress} required />
+            <div className="pt-2 border-t border-border">
+              <h3 className="text-sm font-semibold mb-1 flex items-center gap-1.5">
+                <MapPin size={14} />
+                موقعیت جغرافیایی
+              </h3>
+              <p className="text-[11px] text-muted-foreground mb-3">برای ثبت موقعیت ملک، طول و عرض جغرافیایی را وارد کنید یا از روی نقشه انتخاب کنید.</p>
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <Input label="عرض جغرافیایی" placeholder="مثال: 36.563421" value={form.latitude} onChange={(v) => { set("latitude", v); setCoordError(null); }} />
+                </div>
+                <div className="flex-1">
+                  <Input label="طول جغرافیایی" placeholder="مثال: 53.060112" value={form.longitude} onChange={(v) => { set("longitude", v); setCoordError(null); }} />
+                </div>
+                <Btn variant="secondary" onClick={handleConfirmCoordinates}><Check size={14} />تایید</Btn>
+              </div>
+              {coordError && <p className="text-xs text-destructive mt-2">{coordError}</p>}
+            </div>
             <PropertyMapPicker
               value={form.latitude && form.longitude ? [Number(form.latitude), Number(form.longitude)] : null}
-              onChange={(p) => setForm((s) => ({ ...s, latitude: String(p[0]), longitude: String(p[1]) }))}
+              onChange={(p) => { setForm((s) => ({ ...s, latitude: String(p[0]), longitude: String(p[1]) })); setCoordError(null); }}
               provinceName={selectedLocationNames.provinceName}
               cityName={selectedLocationNames.cityName}
               districtName={selectedLocationNames.districtName}
+              csrfToken={csrfToken}
             />
           </div>
         )}
@@ -425,8 +459,5 @@ function EditPropertyWizard({
   );
 }
 
-// =============================================================================
-//  Listings
-// =============================================================================
 
 export { EditPropertyWizard };

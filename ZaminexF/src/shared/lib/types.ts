@@ -1,7 +1,3 @@
-// =============================================================================
-//  Types (extracted exactly from App.tsx)
-// =============================================================================
-
 import type React from "react";
 
 type Role = "admin" | "consultant";
@@ -15,7 +11,7 @@ type Page =
   | "tickets-sent" | "tickets-received" | "tickets-all" | "create-ticket"
   | "property-reports"
   | "activity"
-  | "settings-workspace" | "settings-users" | "settings-permissions" | "manage-districts" | "districts" | "manage-attributes"
+  | "settings-workspace" | "settings-users" | "settings-permissions" | "settings-login-options" | "manage-districts" | "districts" | "manage-attributes"
   | "consultant-dashboard" | "my-properties" | "all-properties" | "my-listings" | "my-tasks" | "my-followups"
   | "my-profile" | "my-profile-edit" | "my-profile-security";
 
@@ -117,6 +113,7 @@ type Property = {
   gradient?: string;
   description?: string;
   images?: { id: string | number; url: string; alt?: string }[];
+  imageUrl?: string | null;
   appraisalReport?: AppraisalReport | null;
   pricePerSqm?: number | null;
   imagesCount?: number;
@@ -131,7 +128,6 @@ type Property = {
 
 type AppraisalReport = {
   id: string | number;
-  /** Authenticated download endpoint; `?inline=1` switches to preview. */
   url: string;
   fileName: string;
   fileSize: number;
@@ -222,7 +218,7 @@ type Listing = {
   title: string;
   description: string;
   status: "DRAFT" | "ACTIVE" | "PAUSED" | "EXPIRED" | "ARCHIVED";
-  publish_channel: "WEBSITE" | "INSTAGRAM" | "TELEGRAM" | "OTHER";
+  publishChannel: "WEBSITE" | "INSTAGRAM" | "TELEGRAM" | "OTHER";
   start_date: string | null;
   end_date: string | null;
   assigned_to: string | number | null;
@@ -280,7 +276,6 @@ type ActivityLogItem = {
   createdAt: string;
 };
 
-/** One entry of the admin "filter by user" list on the activity page. */
 type ActivityLogUserOption = {
   id: number;
   name: string;
@@ -353,7 +348,7 @@ interface PropertiesPageProps {
   openPropertyDetail: (id: string) => void;
   openPropertyEdit: (id: string) => void;
   onArchive: (id: string) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string) => Promise<boolean>;
   onToggleShared?: (id: string) => Promise<boolean>;
   consultants: any[];
   districtsList?: string[];

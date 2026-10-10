@@ -87,8 +87,6 @@ class TicketSecurityTests(TestCase):
         )
 
     def _multipart_ticket_payload(self, **overrides):
-        """Mirror the browser FormData payload (including JSON array strings)."""
-
         payload = {
             "ticketType": "REQUEST",
             "priority": "NORMAL",
@@ -314,7 +312,8 @@ class TicketSecurityTests(TestCase):
         self.assertEqual(detail.status_code, 200)
         export = self.client.get("/tickets/api/tickets/export/?folder=all")
         self.assertEqual(export.status_code, 200)
-        self.assertIn("TKT-", export.content.decode("utf-8-sig"))
+        body = b"".join(export.streaming_content).decode("utf-8-sig")
+        self.assertIn("TKT-", body)
 
     def test_safe_pdf_attachments_are_stored_and_returned_only_to_participants(self):
         self._auth(self.owner)
@@ -357,6 +356,51 @@ class TicketSecurityTests(TestCase):
             f"/tickets/api/attachments/{attachment_id}/download/"
         )
         self.assertEqual(forbidden_download.status_code, 404)
+
+    def test_recipient_downloads_the_senders_attachment(self):
+        self._auth(self.owner)
+        created = self.client.post(
+            "/tickets/api/tickets/",
+            self._multipart_ticket_payload(
+                attachments=SimpleUploadedFile(
+                    "گزارش.pdf", b"%PDF-1.7\nbody", content_type="application/pdf"
+                ),
+            ),
+            format="multipart",
+        )
+        self.assertEqual(created.status_code, 201, created.json())
+        attachment = created.json()["messages"][0]["attachments"][0]
+
+        self._auth(self.recipient)
+        download = self.client.get(attachment["downloadUrl"])
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(b"".join(download.streaming_content)[:5], b"%PDF-")
+        self.assertIn("filename*=utf-8''", download["Content-Disposition"])
+
+    def test_lost_attachment_file_is_reported_as_missing_and_logged(self):
+        self._auth(self.owner)
+        created = self.client.post(
+            "/tickets/api/tickets/",
+            self._multipart_ticket_payload(
+                attachments=SimpleUploadedFile(
+                    "evidence.pdf", b"%PDF-1.7\nbody", content_type="application/pdf"
+                ),
+            ),
+            format="multipart",
+        )
+        attachment = created.json()["messages"][0]["attachments"][0]
+        stored = TicketAttachment.objects.get(pk=attachment["id"])
+        stored.file.storage.delete(stored.file.name)
+
+        self._auth(self.recipient)
+        with self.assertLogs("apps.tickets.views", level="WARNING") as logs:
+            missing = self.client.get(attachment["downloadUrl"])
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.json()["detail"], "فایل یافت نشد.")
+        self.assertTrue(
+            any(stored.file.name in line for line in logs.output),
+            logs.output,
+        )
 
     def test_rejects_fake_attachment_extension_and_rolls_back_everything(self):
         self._auth(self.owner)

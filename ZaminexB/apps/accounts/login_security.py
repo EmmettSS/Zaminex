@@ -29,7 +29,6 @@ def get_failure_window_seconds() -> int:
 
 
 def normalize_login_identifier(username: str | None) -> str:
-    """Normalize the identifier used for account-scoped login protection."""
     return (username or "").strip().casefold()
 
 
@@ -50,7 +49,6 @@ def format_lockout_message(locked_until) -> str:
 
 
 def get_active_lock(username: str | None):
-    """Return locked_until when the normalized username is currently locked."""
     identifier = normalize_login_identifier(username)
     if not identifier:
         return None
@@ -64,9 +62,6 @@ def get_active_lock(username: str | None):
     if attempt.locked_until and attempt.locked_until > now:
         return attempt.locked_until
 
-    # Clean expired locks lazily so the next login starts with a fresh state.
-    # Do not clear non-locked failed counters here; the rolling failure window
-    # is handled in record_failed_login().
     if attempt.locked_until:
         attempt.failed_attempts = 0
         attempt.locked_until = None
@@ -75,7 +70,6 @@ def get_active_lock(username: str | None):
 
 
 def record_failed_login(username: str | None, request=None):
-    """Persist one failed login attempt and return locked_until if a lock starts."""
     identifier = normalize_login_identifier(username)
     if not identifier:
         return None
@@ -119,7 +113,6 @@ def record_failed_login(username: str | None, request=None):
 
 
 def reset_login_attempts(username: str | None) -> None:
-    """Clear failed-attempt state after a successful login."""
     identifier = normalize_login_identifier(username)
     if not identifier:
         return

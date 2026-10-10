@@ -86,7 +86,6 @@ function PropertiesPage({
   const [confirmArchive, setConfirmArchive] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  // Server-side pagination state
   const [serverProperties, setServerProperties] = useState<Property[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [serverLoading, setServerLoading] = useState(false);
@@ -121,7 +120,6 @@ function PropertiesPage({
       return n;
     });
 
-  // Server fetch with pagination and filters
   const fetchServerProperties = useCallback(async () => {
     setServerLoading(true);
     try {
@@ -134,22 +132,20 @@ function PropertiesPage({
       if (filters.district) params.append("district", filters.district);
       if (filters.propertyStatus) params.append("propertyStatus", filters.propertyStatus);
       if (propertyTypeRef) params.append("propertyTypeRef", propertyTypeRef);
-      // dynamic attribute filters
+      
       const attrQuery = buildAttributeParams(attrValues);
       if (attrQuery) {
-        // attrQuery is like "attr_foo=bar&attr_baz_min=10"
         attrQuery.split("&").forEach((pair) => {
           const [k, v] = pair.split("=");
           if (k && v) params.append(k, decodeURIComponent(v));
         });
       }
 
-      const url = `/properties/api/properties/?${params.toString()}`;
-      const res = await apiFetch(url, { method: "GET" }, csrfToken);
+      const url = `/properties/api/properties/?${params.toString()}`
+      const res = await apiFetch(url, { method: "GET", cache: "no-store" }, csrfToken);
       if (!res.ok) throw new Error("خطا در دریافت املاک");
       const data = await res.json();
       if (Array.isArray(data)) {
-        // Fallback if pagination not enabled
         setServerProperties(data);
         setTotalCount(data.length);
       } else {
@@ -160,7 +156,7 @@ function PropertiesPage({
       }
     } catch (err) {
       console.error("Error fetching properties:", err);
-      // Fallback to initial props on error
+      
       setServerProperties([]);
       setTotalCount(0);
     } finally {
@@ -168,13 +164,30 @@ function PropertiesPage({
     }
   }, [currentPage, pageSize, search, filters, propertyTypeRef, attrValues, csrfToken]);
 
-  // Fetch on mount and when dependencies change
   useEffect(() => {
     fetchServerProperties();
   }, [fetchServerProperties]);
 
-  // When filters change, page already reset to 1 via setFilter
-  // Sorting is client-side on current page only for minimal change
+  const applyLocalRemoval = useCallback(
+    (ids: string[]) => {
+      const idSet = new Set(ids);
+      const removedOnThisPage = serverProperties.filter((p) => idSet.has(String(p.id))).length;
+      setServerProperties((prev) => prev.filter((p) => !idSet.has(String(p.id))));
+      setTotalCount((t) => Math.max(0, t - ids.length));
+      setSelected((s) => {
+        const next = new Set(s);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+      if (removedOnThisPage > 0 && removedOnThisPage >= serverProperties.length && currentPage > 1) {
+        setCurrentPage((pg) => pg - 1);
+      } else {
+        fetchServerProperties();
+      }
+    },
+    [serverProperties, currentPage, fetchServerProperties]
+  );
+
   const sorted = useMemo(() => {
     const arr = [...serverProperties];
     if (!sortCol) return arr;
@@ -190,7 +203,7 @@ function PropertiesPage({
     });
   }, [serverProperties, sortCol, sortDir]);
 
-  const paginated = sorted; // Already paginated from server
+  const paginated = sorted;
 
   const toggleAll = () =>
     setSelected((s) => (s.size === paginated.length ? new Set() : new Set(paginated.map((p) => String(p.id)))));
@@ -352,11 +365,13 @@ function PropertiesPage({
                 description="با فیلترهای فعلی هیچ ملکی پیدا نشد. فیلترها را تغییر دهید یا ملک جدیدی اضافه کنید."
               />
             ) : (
-              paginated.map((p) => (
+              paginated.map((p) => {
+                const cover = p.imageUrl || p.images?.[0]?.url;
+                return (
                 <Card key={p.id} hover onClick={() => openPropertyDetail(String(p.id))} className="overflow-hidden">
                   <div
-                    className={cx("h-36 relative flex items-end p-4", !p.images?.length && (p.gradient || "from-emerald-500 to-teal-600"))}
-                    style={p.images?.length ? { backgroundImage: `url(${p.images[0].url})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+                    className={cx("h-36 relative flex items-end p-4", !cover && (p.gradient || "from-emerald-500 to-teal-600"))}
+                    style={cover ? { backgroundImage: `url(${cover})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
                   >
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
                     <div className="absolute top-3 left-3 flex gap-1.5 flex-wrap z-10">
@@ -393,7 +408,8 @@ function PropertiesPage({
                     </div>
                   </div>
                 </Card>
-              ))
+                );
+              })
             )}
           </div>
           {paginated.length > 0 && (
@@ -422,8 +438,13 @@ function PropertiesPage({
                   setSelected(new Set());
                 }}
                 onDelete={() => {
-                  selected.forEach((id) => onDelete(id));
+                  const ids = Array.from(selected);
                   setSelected(new Set());
+                  void (async () => {
+                    const results = await Promise.all(ids.map((id) => onDelete(id)));
+                    const okIds = ids.filter((_, i) => results[i]);
+                    if (okIds.length > 0) applyLocalRemoval(okIds);
+                  })();
                 }}
                 onClear={() => setSelected(new Set())}
               />
@@ -560,8 +581,16 @@ function PropertiesPage({
         danger
         message="این ملک و تمام داده‌های مرتبط با آن برای همیشه حذف خواهند شد. این عملیات غیرقابل بازگشت است."
         onConfirm={() => {
-          if (confirmDelete) onDelete(confirmDelete);
+          if (!confirmDelete) {
+            setConfirmDelete(null);
+            return;
+          }
+          const id = confirmDelete;
           setConfirmDelete(null);
+          void (async () => {
+            const ok = await onDelete(id);
+            if (ok) applyLocalRemoval([id]);
+          })();
         }}
         onCancel={() => setConfirmDelete(null)}
       />

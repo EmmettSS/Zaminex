@@ -1,5 +1,3 @@
-"""Tests for the EAV value engine (typed storage, coercion, validation)."""
-
 import datetime
 from decimal import Decimal
 
@@ -14,8 +12,6 @@ User = get_user_model()
 
 
 class AttributeValueStorageTests(TestCase):
-    """Each data type must land in — and read back from — the right column."""
-
     @classmethod
     def setUpTestData(cls):
         cls.agent = User.objects.create_user(
@@ -99,14 +95,12 @@ class AttributeValueStorageTests(TestCase):
         self.assertEqual(stored.display_value, "دریا، کوه")
 
     def test_thousands_separators_are_accepted(self):
-        """Persian price inputs arrive formatted; the value must still parse."""
         attribute = Attribute.objects.create(
             name="fee", display_name="هزینه", data_type=Attribute.DataType.INTEGER
         )
         self.assertEqual(self._store(attribute, "1,500,000").value_integer, 1_500_000)
 
     def test_changing_the_value_clears_the_previous_column(self):
-        """Switching types must not leave a stale value behind."""
         attribute = Attribute.objects.create(
             name="note", display_name="یادداشت", data_type=Attribute.DataType.TEXT
         )
@@ -171,7 +165,6 @@ class AttributeValueValidationTests(TestCase):
             self._value(attribute).set_value("old")
 
     def test_core_attributes_cannot_be_stored_in_the_eav_table(self):
-        """Core values belong in their real column, not here."""
         attribute = Attribute.objects.create(
             name="area",
             display_name="متراژ",
@@ -209,8 +202,6 @@ class AttributeValueValidationTests(TestCase):
 
 
 class AttributeValueQueryTests(TestCase):
-    """Filtering must use the typed column so comparisons are numeric."""
-
     @classmethod
     def setUpTestData(cls):
         cls.agent = User.objects.create_user(username="agent3", password="x", role="AGENT")
@@ -241,7 +232,6 @@ class AttributeValueQueryTests(TestCase):
         self.assertEqual(matches.count(), 2, "12 and 25 are >= 10, 5 is not")
 
     def test_comparison_is_numeric_not_lexicographic(self):
-        """A string comparison would rank "5" above "25"."""
         matches = Property.objects.filter(
             attribute_values__attribute=self.attribute,
             attribute_values__value_integer__gt=20,

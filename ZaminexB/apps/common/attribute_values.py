@@ -1,15 +1,3 @@
-"""Shared base for the EAV value tables.
-
-``PropertyAttributeValue`` and ``ListingAttributeValue`` are structurally
-identical — only the owning foreign key differs — so the columns, the typed
-read/write helpers and the validation live here.
-
-One row holds one attribute's value for one record. Which column is populated
-depends on the attribute's ``data_type``; the rest stay NULL. This keeps values
-correctly typed (so ``value_integer >= 3`` is a real numeric comparison, not a
-string one) and lets each column carry its own index.
-"""
-
 from __future__ import annotations
 
 import datetime
@@ -25,8 +13,6 @@ class AttributeValueQuerySet(models.QuerySet):
 
 
 class BaseAttributeValue(models.Model):
-    """One attribute value, stored in the column matching its data type."""
-
     attribute = models.ForeignKey(
         "basics.Attribute",
         on_delete=models.CASCADE,
@@ -50,11 +36,8 @@ class BaseAttributeValue(models.Model):
     class Meta:
         abstract = True
 
-    # -- typed access -------------------------------------------------------
-
     @property
     def value(self):
-        """The populated value, whatever its type."""
         return getattr(self, self.attribute.value_field)
 
     @value.setter
@@ -62,16 +45,8 @@ class BaseAttributeValue(models.Model):
         self.set_value(raw)
 
     def set_value(self, raw):
-        """Coerce ``raw`` into the column matching the attribute's data type.
-
-        Input arrives as strings from JSON and HTML forms, so each branch
-        parses defensively and reports a Persian error the UI can display
-        as-is.
-        """
         from apps.basics.models import Attribute
 
-        # Start clean: switching an attribute's type must not leave a stale
-        # value behind in the previous column.
         for field in (
             "value_text", "value_integer", "value_decimal",
             "value_boolean", "value_date", "value_json",
@@ -92,12 +67,22 @@ class BaseAttributeValue(models.Model):
                 self.value_integer = int(str(raw).strip().replace(",", ""))
             except (TypeError, ValueError):
                 raise ValidationError({self.attribute.name: f"«{label}» باید عدد صحیح باشد."})
+            if (
+                self.attribute.input_type == Attribute.InputType.PRICE
+                or "تومان" in (self.attribute.unit or "")
+            ) and self.value_integer <= 0:
+                raise ValidationError({self.attribute.name: f"«{label}» باید بیشتر از صفر باشد."})
 
         elif data_type == Attribute.DataType.DECIMAL:
             try:
                 self.value_decimal = Decimal(str(raw).strip().replace(",", ""))
             except (TypeError, ValueError, InvalidOperation):
                 raise ValidationError({self.attribute.name: f"«{label}» باید عدد باشد."})
+            if (
+                self.attribute.input_type == Attribute.InputType.PRICE
+                or "تومان" in (self.attribute.unit or "")
+            ) and self.value_decimal <= 0:
+                raise ValidationError({self.attribute.name: f"«{label}» باید بیشتر از صفر باشد."})
 
         elif data_type == Attribute.DataType.BOOLEAN:
             if isinstance(raw, bool):
@@ -148,14 +133,13 @@ class BaseAttributeValue(models.Model):
                 )
             self.value_json = tokens
 
-        else:  # pragma: no cover — guards against a new unhandled data type
+        else:
             raise ValidationError(
                 {self.attribute.name: f"نوع دادهٔ «{data_type}» پشتیبانی نمی‌شود."}
             )
 
     @property
     def display_value(self) -> str:
-        """Human-readable rendering, resolving option keys to their labels."""
         from apps.basics.models import Attribute
 
         value = self.value

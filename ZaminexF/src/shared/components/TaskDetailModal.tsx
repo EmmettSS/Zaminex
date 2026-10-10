@@ -176,8 +176,5 @@ function TaskDetailModal({ task, onClose, onSave, onDelete }: { task: any; onClo
   );
 }
 
-// =============================================================================
-//  Auth (Login Page)
-// =============================================================================
 
 export { TaskDetailModal };

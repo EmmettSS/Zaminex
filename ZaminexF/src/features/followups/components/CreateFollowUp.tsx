@@ -186,9 +186,6 @@ function CreateFollowUp({
   );
 }
 
-// =============================================================================
-//  Property-scoped Reports
-// =============================================================================
 
 const CHART_COLORS = ["#0BB68A", "#3B82F6", "#F59E0B", "#8B5CF6", "#EF4444", "#EC4899", "#14B8A6", "#F97316"];
 const DELEGATION_COLORS = { selfManaged: "#0BB68A", delegated: "#3B82F6", unassigned: "#94A3B8" };

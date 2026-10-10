@@ -1,5 +1,3 @@
-"""REST serializers for the ticket workspace."""
-
 from __future__ import annotations
 
 import json
@@ -35,24 +33,8 @@ User = get_user_model()
 
 
 def _parse_form_list(values):
-    """Return a flat list from JSON, repeated, or comma-separated form values.
-
-    ``QueryDict`` stores a value assigned with ``data["field"] = [..]`` as one
-    item whose value is itself a list.  DRF then hands that nested value to a
-    ``ListField`` child (for example an ``IntegerField``), which is the source
-    of the misleading "valid number" error raised by the ticket form.
-
-    This helper deliberately works with values obtained via ``getlist`` and
-    returns an ordinary Python list.  It therefore supports browser FormData
-    (`[4, 7]` as JSON), repeated form keys, and the comma-separated format used
-    by a few older clients without mutating the incoming QueryDict.
-    """
-
     parsed_values = []
     for value in values:
-        # Native JSON requests already contain lists.  Unpack only this outer
-        # list; a deliberately malformed deeper list is left to DRF's child
-        # field validation instead of being silently coerced.
         if isinstance(value, (list, tuple)):
             parsed_values.extend(value)
             continue
@@ -66,9 +48,6 @@ def _parse_form_list(values):
         try:
             decoded = json.loads(text)
         except (TypeError, ValueError):
-            # FormData has no native array primitive.  Supporting repeated
-            # values above and comma-separated values here makes a one-item
-            # recipient/tag input behave as a list as well.
             parsed_values.extend(
                 part.strip() for part in text.split(",") if part.strip()
             )
@@ -81,8 +60,6 @@ def _parse_form_list(values):
 
 
 def _as_file_list(value):
-    """Keep repeated multipart files as an ordinary list of UploadedFiles."""
-
     if value is None:
         return []
     if isinstance(value, (list, tuple)):
@@ -91,15 +68,6 @@ def _as_file_list(value):
 
 
 def _normalise_request_data(data, *, aliases, list_fields, file_fields=()):
-    """Map API aliases and normalise multipart input without changing QueryDict.
-
-    DRF hands multipart input to serializers as a QueryDict.  Assigning a
-    Python list back through ``__setitem__`` nests it in that QueryDict.  Build
-    a fresh, plain dictionary instead, keeping scalar values scalar and
-    obtaining repeated values/files with ``getlist`` before any alias mapping.
-    JSON requests are normal dictionaries and retain the same public aliases.
-    """
-
     list_fields = set(list_fields)
     file_fields = set(file_fields)
 
@@ -107,9 +75,6 @@ def _normalise_request_data(data, *, aliases, list_fields, file_fields=()):
         normalised = {}
         for source_key in data.keys():
             target_key = aliases.get(source_key, source_key)
-            # The canonical field takes precedence when a caller sends both
-            # spellings.  This matches the old mapping behaviour while making
-            # the choice deterministic.
             if source_key in aliases and target_key in data:
                 continue
 
@@ -121,13 +86,9 @@ def _normalise_request_data(data, *, aliases, list_fields, file_fields=()):
                     else _parse_form_list(values)
                 )
             else:
-                # QueryDict.get returns one scalar (the last submitted value),
-                # exactly what scalar DRF fields expect.
                 normalised[target_key] = data.get(source_key)
         return normalised
 
-    # JSONParser supplies a normal mapping.  Do not mutate it: serializers can
-    # be reused and callers may hold a reference to request.data.
     normalised = dict(data)
     for source_key, target_key in aliases.items():
         if target_key not in normalised and source_key in normalised:
@@ -184,13 +145,6 @@ def _subject_label(subject_type: str, subject) -> str:
 
 
 def subject_summary(user, subject_type: str, subject) -> dict:
-    """Return a deliberately small subject projection.
-
-    A user may be allowed to read a ticket while not being allowed to read the
-    linked record.  In that case callers must use the restricted projection,
-    which contains no object id or business data.
-    """
-
     type_label = dict(TicketSubject.choices).get(subject_type, "موضوع")
     if not subject_is_accessible(user, subject_type, subject):
         return {
@@ -417,7 +371,7 @@ class TicketListSerializer(serializers.ModelSerializer):
             for p in self._participants(obj)
             if p.role == TicketParticipantRole.RECIPIENT
         ]
-        # A recipient must not learn who else received a private group ticket.
+        
         if (
             viewer
             and not getattr(viewer, "role", "") == "ADMIN"
@@ -438,8 +392,7 @@ class TicketListSerializer(serializers.ModelSerializer):
         participant = self._participant(obj)
         if participant:
             return bool(participant.is_read)
-        # Admin oversight rows are not an unread inbox item unless the admin is
-        # an actual participant in the conversation.
+        
         return True if viewer and getattr(viewer, "role", "") == "ADMIN" else False
 
     def get_isUnread(self, obj):
@@ -589,8 +542,6 @@ class TicketCreateSerializer(serializers.Serializer):
 
 
 class TicketUpdateSerializer(serializers.Serializer):
-    """Metadata-only update; messages and subjects are immutable."""
-
     title = serializers.CharField(required=False, allow_blank=False, max_length=255)
     priority = serializers.ChoiceField(choices=TicketPriority.choices, required=False)
     status = serializers.ChoiceField(choices=TicketStatus.choices, required=False)
@@ -663,16 +614,12 @@ class TicketReplySerializer(serializers.Serializer):
                     {"thread_recipient_id": "گیرنده این رشته معتبر نیست."}
                 )
         elif user.pk in recipient_ids:
-            # Recipients can only answer their own private branch.
             if target is not None and target != user.pk:
                 raise serializers.ValidationError(
                     {"thread_recipient_id": "پاسخ خصوصی فقط برای رشته خودتان مجاز است."}
                 )
             target = user.pk
         elif getattr(user, "role", "") == "ADMIN":
-            # An overseeing admin may publish a common reply (NULL) or target
-            # one known recipient.  This does not reveal the private messages
-            # of one branch to another recipient.
             if target is not None and target not in recipient_ids:
                 raise serializers.ValidationError(
                     {"thread_recipient_id": "گیرنده این رشته معتبر نیست."}

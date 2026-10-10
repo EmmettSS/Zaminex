@@ -1,16 +1,6 @@
-"""API for the reference data and the dynamic form schemas.
-
-Two groups of endpoints:
-
-* **Management** (`/basics/api/...`) — CRUD over usages, property types, deal
-  types, attributes and their bindings. Reading is open to any authenticated
-  user (the property form needs the catalogue); writing is admin-only.
-
-* **Schema** (`/basics/api/schema/...`) — the payload that drives the dynamic
-  "افزودن ملک" / "ساخت آگهی" forms and the search filters.
-"""
-
 from __future__ import annotations
+
+import logging
 
 from django.db.models import Prefetch
 from rest_framework import status, viewsets
@@ -20,9 +10,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import UserRole
+from apps.common import cache_utils
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     Attribute,
+    AttributeCategory,
     City,
     District,
     Province,
@@ -37,6 +31,7 @@ from .models import (
 )
 from .serializers import (
     AttributeOptionSerializer,
+    AttributeCategorySerializer,
     CitySerializer,
     DistrictSerializer,
     ProvinceSerializer,
@@ -52,12 +47,6 @@ from .serializers import (
 
 
 class ReadAnyWriteAdmin(IsAuthenticated):
-    """Everyone signed in may read; only admins may modify.
-
-    Consultants need the catalogue to fill in the property form, but the
-    catalogue itself is administrator-owned.
-    """
-
     SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
     message = "فقط مدیر می‌تواند اطلاعات پایه را ویرایش کند."
 
@@ -70,23 +59,10 @@ class ReadAnyWriteAdmin(IsAuthenticated):
 
 
 class BasicsViewSet(viewsets.ModelViewSet):
-    """Shared behaviour for the reference-data endpoints."""
-
     permission_classes = [ReadAnyWriteAdmin]
 
     def get_queryset(self):
-        """Hide deactivated rows from *lists* unless the caller asks for them.
-
-        The property form only ever wants active options; the management screen
-        passes ``?all=1`` to show everything so an administrator can reactivate
-        something.
-
-        The filter is limited to list responses on purpose. Applying it to
-        detail routes as well would make a deactivated row unreachable by its
-        own id, so the management screen could switch something off and then be
-        unable to delete or reactivate it.
-        """
-        queryset = self.queryset
+        queryset = self.queryset.all()
         if self.action == "list" and self.request.query_params.get("all") not in {
             "1",
             "true",
@@ -97,7 +73,6 @@ class BasicsViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def restore(self, request, pk=None):
-        """Bring back a soft-deleted row."""
         instance = self.queryset.model.all_objects.filter(pk=pk).first()
         if instance is None:
             return Response({"detail": "مورد یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
@@ -110,7 +85,6 @@ class PropertyUsageViewSet(BasicsViewSet):
     serializer_class = PropertyUsageSerializer
 
     def perform_destroy(self, instance):
-        """Refuse to remove a usage that still has property types."""
         if instance.property_types.filter(is_active=True).exists():
             from rest_framework.exceptions import ValidationError
 
@@ -128,7 +102,6 @@ class PropertyTypeViewSet(BasicsViewSet):
         queryset = super().get_queryset()
         usage = self.request.query_params.get("usage")
         if usage:
-            # Accept either the numeric id or the system key.
             if str(usage).isdigit():
                 queryset = queryset.filter(property_usage_id=usage)
             else:
@@ -137,7 +110,6 @@ class PropertyTypeViewSet(BasicsViewSet):
 
     @action(detail=True, methods=["get"], url_path="attributes")
     def attributes(self, request, pk=None):
-        """Attribute bindings for this property type (management view)."""
         property_type = self.get_object()
         links = (
             property_type.attribute_links.select_related("attribute")
@@ -162,6 +134,35 @@ class DealTypeViewSet(BasicsViewSet):
         return Response(DealTypeAttributeSerializer(links, many=True).data)
 
 
+class AttributeCategoryViewSet(BasicsViewSet):
+    queryset = AttributeCategory.objects.all()
+    serializer_class = AttributeCategorySerializer
+
+    def perform_create(self, serializer):
+        last = AttributeCategory.objects.order_by("-sort_order").values_list(
+            "sort_order", flat=True
+        ).first()
+        serializer.save(sort_order=(last or 0) + 1)
+
+    def perform_destroy(self, instance):
+        from rest_framework.exceptions import ValidationError
+
+        if instance.is_system_category:
+            raise ValidationError(
+                f"«{instance.display_name}» یکی از دسته‌بندی‌های پایهٔ سیستم است و "
+                "حذف آن امکان‌پذیر نیست؛ در صورت عدم نیاز آن را غیرفعال کنید."
+            )
+
+        count = instance.attribute_count()
+        if count:
+            raise ValidationError(
+                f"«{instance.display_name}» شامل {count} ویژگی است؛ ابتدا آن ویژگی‌ها "
+                "را به دسته‌بندی دیگری منتقل کنید تا این دسته‌بندی خالی شود."
+            )
+
+        instance.delete()
+
+
 class AttributeViewSet(BasicsViewSet):
     queryset = Attribute.objects.prefetch_related("options")
     serializer_class = AttributeSerializer
@@ -176,18 +177,27 @@ class AttributeViewSet(BasicsViewSet):
         return queryset
 
     def perform_destroy(self, instance):
-        """Core attributes are wired to real columns and cannot be removed."""
-        if instance.is_core:
-            from rest_framework.exceptions import ValidationError
+        from rest_framework.exceptions import ValidationError
 
+        if instance.is_core:
             raise ValidationError(
                 "ویژگی‌های ثابت به ستون‌های پایگاه داده متصل هستند و قابل حذف نیستند."
             )
+
+        bound_count = PropertyTypeAttribute.objects.filter(
+            attribute=instance, is_active=True
+        ).count() + DealTypeAttribute.objects.filter(
+            attribute=instance, is_active=True
+        ).count()
+        if bound_count:
+            raise ValidationError(
+                f"این ویژگی به {bound_count} نوع متصل است؛ ابتدا اتصالات را حذف کنید."
+            )
+
         instance.delete()
 
     @action(detail=True, methods=["get", "post"], url_path="options")
     def options(self, request, pk=None):
-        """List or add the choices of a select/multiselect attribute."""
         attribute = self.get_object()
 
         if request.method == "GET":
@@ -213,12 +223,6 @@ class AttributeViewSet(BasicsViewSet):
         url_path=r"options/(?P<option_id>\d+)",
     )
     def delete_option(self, request, pk=None, option_id=None):
-        """Remove one choice from a select/multiselect attribute.
-
-        Refused while a stored value still uses it: deleting the option would
-        leave those records pointing at a key that no longer resolves to a
-        label, so they would render as a raw system key.
-        """
         if getattr(request.user, "role", "") != UserRole.ADMIN:
             return Response(
                 {"detail": "فقط مدیر می‌تواند گزینه‌ها را ویرایش کند."},
@@ -259,13 +263,6 @@ class AttributeViewSet(BasicsViewSet):
 
 
 def _sync_search_binding(form_link):
-    """Keep list/search filters in step with form bindings.
-
-    Binding an attribute to a type is what the admin screen does. The
-    property list reads a *separate* search-binding table, so a newly
-    attached field would otherwise never appear as a filter. Attributes
-    marked «بدون فیلتر» stay off the bar on purpose.
-    """
     attribute = form_link.attribute
     if isinstance(form_link, PropertyTypeAttribute):
         search_model = PropertyTypeSearchAttribute
@@ -299,8 +296,6 @@ def _drop_search_binding(form_link):
 
 
 class PropertyTypeAttributeViewSet(viewsets.ModelViewSet):
-    """Bind attributes to property types (which fields the form shows)."""
-
     queryset = PropertyTypeAttribute.objects.select_related(
         "attribute", "property_type"
     ).prefetch_related("attribute__options")
@@ -328,7 +323,6 @@ class PropertyTypeAttributeViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="reorder")
     def reorder(self, request):
-        """Persist a drag-and-drop reordering in one round trip."""
         if getattr(request.user, "role", "") != UserRole.ADMIN:
             return Response(
                 {"detail": "فقط مدیر می‌تواند ترتیب را تغییر دهد."},
@@ -342,19 +336,22 @@ class PropertyTypeAttributeViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        changed = 0
         for item in payload:
             link_id = item.get("id")
             sort_order = item.get("sortOrder", item.get("sort_order"))
             if link_id is None or sort_order is None:
                 continue
             PropertyTypeAttribute.objects.filter(pk=link_id).update(sort_order=sort_order)
+            changed += 1
+
+        if changed:
+            invalidate_reference_caches()
 
         return Response({"detail": "ترتیب ذخیره شد."})
 
 
 class DealTypeAttributeViewSet(viewsets.ModelViewSet):
-    """Bind attributes to deal types (which fields the listing form shows)."""
-
     queryset = DealTypeAttribute.objects.select_related(
         "attribute", "deal_type"
     ).prefetch_related("attribute__options")
@@ -381,12 +378,7 @@ class DealTypeAttributeViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
-# ---------------------------------------------------------------------------
-#  Form schema
-# ---------------------------------------------------------------------------
-
 def _active_links(manager):
-    """Active bindings, with everything the serializer touches prefetched."""
     return (
         manager.filter(is_active=True, attribute__is_active=True)
         .filter(attribute__deleted_at__isnull=True)
@@ -401,16 +393,211 @@ def _active_links(manager):
     )
 
 
+REFERENCE_TTL = 600
+
+
+def _build_catalog_payload() -> dict:
+    usages = PropertyUsage.objects.filter(is_active=True)
+    types = (
+        PropertyType.objects.filter(is_active=True)
+        .select_related("property_usage")
+    )
+    deals = DealType.objects.filter(is_active=True)
+    return {
+        "usages": PropertyUsageSerializer(usages, many=True).data,
+        "propertyTypes": PropertyTypeSerializer(types, many=True).data,
+        "dealTypes": DealTypeSerializer(deals, many=True).data,
+    }
+
+
+def cached_basics_catalog() -> dict:
+    key = cache_utils.make_key("catalog")
+    return cache_utils.cache_or_compute(key, _build_catalog_payload, REFERENCE_TTL)
+
+
+def _build_location_tree_payload() -> list:
+    provinces = (
+        Province.objects.filter(is_active=True)
+        .prefetch_related(
+            Prefetch("cities", queryset=City.objects.filter(is_active=True)),
+            Prefetch(
+                "cities__districts",
+                queryset=District.objects.filter(is_active=True),
+            ),
+        )
+    )
+    return [
+        {
+            "id": province.id,
+            "name": province.name,
+            "displayName": province.display_name,
+            "cities": [
+                {
+                    "id": city.id,
+                    "name": city.name,
+                    "displayName": city.display_name,
+                    "districts": [
+                        {
+                            "id": district.id,
+                            "name": district.name,
+                            "displayName": district.display_name,
+                        }
+                        for district in city.districts.all()
+                    ],
+                }
+                for city in province.cities.all()
+            ],
+        }
+        for province in provinces
+    ]
+
+
+def cached_location_tree() -> list:
+    key = cache_utils.make_key("location-tree")
+    return cache_utils.cache_or_compute(
+        key, _build_location_tree_payload, REFERENCE_TTL
+    )
+
+
+def _build_property_form_payload(property_type: PropertyType) -> dict:
+    links = _active_links(property_type.attribute_links)
+    fields = FormFieldSerializer(links, many=True).data
+    return {
+        "propertyType": {
+            "id": property_type.id,
+            "name": property_type.name,
+            "displayName": property_type.display_name,
+        },
+        "propertyUsage": {
+            "id": property_type.property_usage_id,
+            "name": property_type.property_usage.name,
+            "displayName": property_type.property_usage.display_name,
+        },
+        "fields": [f for f in fields if not f["isFacility"]],
+        "facilities": [f for f in fields if f["isFacility"]],
+    }
+
+
+def cached_property_form_schema(property_type_pk: int) -> dict:
+    key = cache_utils.make_key("schema", "property-form", property_type_pk)
+
+    def compute():
+        property_type = (
+            PropertyType.objects.select_related("property_usage")
+            .filter(pk=property_type_pk)
+            .first()
+        )
+        if property_type is None:
+            return None
+        return _build_property_form_payload(property_type)
+
+    return cache_utils.cache_or_compute(key, compute, REFERENCE_TTL)
+
+
+def _build_listing_form_payload(deal_type: DealType) -> dict:
+    links = _active_links(deal_type.attribute_links)
+    fields = FormFieldSerializer(links, many=True).data
+    return {
+        "dealType": {
+            "id": deal_type.id,
+            "name": deal_type.name,
+            "displayName": deal_type.display_name,
+        },
+        "fields": [f for f in fields if not f["isFacility"]],
+        "facilities": [f for f in fields if f["isFacility"]],
+    }
+
+
+def cached_listing_form_schema(deal_type_pk: int) -> dict:
+    key = cache_utils.make_key("schema", "listing-form", deal_type_pk)
+
+    def compute():
+        deal_type = DealType.objects.filter(pk=deal_type_pk).first()
+        if deal_type is None:
+            return None
+        return _build_listing_form_payload(deal_type)
+
+    return cache_utils.cache_or_compute(key, compute, REFERENCE_TTL)
+
+
+def _build_search_payload(property_type, deal_type) -> dict:
+    property_filters = (
+        SearchFilterSerializer(
+            _active_links(property_type.search_attribute_links), many=True
+        ).data
+        if property_type is not None
+        else []
+    )
+    deal_filters = (
+        SearchFilterSerializer(
+            _active_links(deal_type.search_attribute_links), many=True
+        ).data
+        if deal_type is not None
+        else []
+    )
+    return {"propertyFilters": property_filters, "dealFilters": deal_filters}
+
+
+def cached_search_schema(property_type_pk, deal_type_pk) -> dict:
+    key = cache_utils.make_key(
+        "schema", "search", property_type_pk or "-", deal_type_pk or "-"
+    )
+
+    def compute():
+        property_type = (
+            PropertyType.objects.filter(pk=property_type_pk).first()
+            if property_type_pk
+            else None
+        )
+        deal_type = (
+            DealType.objects.filter(pk=deal_type_pk).first()
+            if deal_type_pk
+            else None
+        )
+        return _build_search_payload(property_type, deal_type)
+
+    return cache_utils.cache_or_compute(key, compute, REFERENCE_TTL)
+
+
+def _all_reference_keys(extra_pts=(), extra_dts=()) -> list:
+    pts = list(PropertyType.objects.values_list("pk", flat=True))
+    dts = list(DealType.objects.values_list("pk", flat=True))
+    for pk in extra_pts:
+        if pk not in pts:
+            pts.append(pk)
+    for pk in extra_dts:
+        if pk not in dts:
+            dts.append(pk)
+    keys = [
+        cache_utils.make_key("catalog"),
+        cache_utils.make_key("location-tree"),
+    ]
+    for pt in pts:
+        keys.append(cache_utils.make_key("schema", "property-form", pt))
+    for dt in dts:
+        keys.append(cache_utils.make_key("schema", "listing-form", dt))
+    for pt in [*pts, None]:
+        for dt in [*dts, None]:
+            keys.append(
+                cache_utils.make_key("schema", "search", pt or "-", dt or "-")
+            )
+    return keys
+
+
+def invalidate_reference_caches(sender=None, instance=None, **kwargs) -> None:
+    extra_pts = (instance.pk,) if instance is not None and sender is PropertyType else ()
+    extra_dts = (instance.pk,) if instance is not None and sender is DealType else ()
+    try:
+        for key in _all_reference_keys(extra_pts, extra_dts):
+            cache_utils.cache_delete(key)
+    except Exception:
+        logger.debug(
+            "reference cache invalidation failed; the TTL is the backstop",
+            exc_info=True,
+        )
+
+
 class PropertyFormSchemaView(APIView):
-    """Fields the "افزودن ملک" form should render for a property type.
-
-    ``GET /basics/api/schema/property-form/?propertyType=<id|name>``
-
-    Core attributes are returned alongside dynamic ones so the frontend can
-    render one ordered form; ``isCore`` tells it whether the value belongs in a
-    model column or in the attribute-values payload.
-    """
-
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -430,35 +617,11 @@ class PropertyFormSchemaView(APIView):
                 {"detail": "نوع ملک یافت نشد."}, status=status.HTTP_404_NOT_FOUND
             )
 
-        links = _active_links(property_type.attribute_links)
-        fields = FormFieldSerializer(links, many=True).data
-
-        return Response(
-            {
-                "propertyType": {
-                    "id": property_type.id,
-                    "name": property_type.name,
-                    "displayName": property_type.display_name,
-                },
-                "propertyUsage": {
-                    "id": property_type.property_usage_id,
-                    "name": property_type.property_usage.name,
-                    "displayName": property_type.property_usage.display_name,
-                },
-                # Split out so the form can group facilities into a checkbox
-                # block without re-deriving the grouping client-side.
-                "fields": [f for f in fields if not f["isFacility"]],
-                "facilities": [f for f in fields if f["isFacility"]],
-            }
-        )
+        payload = cached_property_form_schema(property_type.pk)
+        return Response(payload)
 
 
 class ListingFormSchemaView(APIView):
-    """Fields the "ساخت آگهی" form should render for a deal type.
-
-    ``GET /basics/api/schema/listing-form/?dealType=<id|name>``
-    """
-
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -476,40 +639,18 @@ class ListingFormSchemaView(APIView):
                 {"detail": "نوع معامله یافت نشد."}, status=status.HTTP_404_NOT_FOUND
             )
 
-        links = _active_links(deal_type.attribute_links)
-        fields = FormFieldSerializer(links, many=True).data
-
-        return Response(
-            {
-                "dealType": {
-                    "id": deal_type.id,
-                    "name": deal_type.name,
-                    "displayName": deal_type.display_name,
-                },
-                "fields": [f for f in fields if not f["isFacility"]],
-                "facilities": [f for f in fields if f["isFacility"]],
-            }
-        )
+        return Response(cached_listing_form_schema(deal_type.pk))
 
 
 class SearchSchemaView(APIView):
-    """Filters the search bar should offer.
-
-    ``GET /basics/api/schema/search/?propertyType=<id|name>``
-    ``GET /basics/api/schema/search/?dealType=<id|name>``
-
-    With neither parameter it returns the filters shared by every type, which
-    is what the unfiltered listing page needs.
-    """
-
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         property_type_raw = request.query_params.get("propertyType")
         deal_type_raw = request.query_params.get("dealType")
 
-        property_filters = []
-        deal_filters = []
+        property_type_pk = None
+        deal_type_pk = None
 
         if property_type_raw:
             lookup = (
@@ -522,9 +663,7 @@ class SearchSchemaView(APIView):
                 return Response(
                     {"detail": "نوع ملک یافت نشد."}, status=status.HTTP_404_NOT_FOUND
                 )
-            property_filters = SearchFilterSerializer(
-                _active_links(property_type.search_attribute_links), many=True
-            ).data
+            property_type_pk = property_type.pk
 
         if deal_type_raw:
             lookup = (
@@ -535,54 +674,22 @@ class SearchSchemaView(APIView):
             deal_type = DealType.objects.filter(**lookup).first()
             if deal_type is None:
                 return Response(
-                    {"detail": "نوع معامله یافت نشد."}, status=status.HTTP_404_NOT_FOUND
+                    {"detail": "نوع معامله یافت نشد."},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
-            deal_filters = SearchFilterSerializer(
-                _active_links(deal_type.search_attribute_links), many=True
-            ).data
+            deal_type_pk = deal_type.pk
 
-        return Response(
-            {"propertyFilters": property_filters, "dealFilters": deal_filters}
-        )
+        return Response(cached_search_schema(property_type_pk, deal_type_pk))
 
 
 class BasicsCatalogView(APIView):
-    """The whole catalogue in one request.
-
-    The property form needs usages, types and deal types together; fetching
-    them separately would mean three round trips before the first field can be
-    drawn.
-    """
-
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        usages = PropertyUsage.objects.filter(is_active=True)
-        types = PropertyType.objects.filter(is_active=True).select_related("property_usage")
-        deals = DealType.objects.filter(is_active=True)
+        return Response(cached_basics_catalog())
 
-        return Response(
-            {
-                "usages": PropertyUsageSerializer(usages, many=True).data,
-                "propertyTypes": PropertyTypeSerializer(types, many=True).data,
-                "dealTypes": DealTypeSerializer(deals, many=True).data,
-            }
-        )
-
-
-# ---------------------------------------------------------------------------
-#  Geography: Province → City → District
-# ---------------------------------------------------------------------------
 
 class _GeographyViewSet(BasicsViewSet):
-    """Shared behaviour for the Province/City/District admin endpoints.
-
-    New rows are created with a ``sort_order`` greater than every existing row
-    so that freshly added items appear at the top of the management list (the
-    model's default ordering is ``sort_order`` first). This keeps the "add and
-    see it immediately" workflow working without requiring manual reordering.
-    """
-
     def perform_create(self, serializer):
         model = serializer.Meta.model
         last = model.objects.order_by("-sort_order").values_list(
@@ -593,8 +700,6 @@ class _GeographyViewSet(BasicsViewSet):
 
 
 class ProvinceViewSet(_GeographyViewSet):
-    """Provinces. Administrator-managed; nothing is seeded."""
-
     queryset = Province.objects.all()
     serializer_class = ProvinceSerializer
 
@@ -612,8 +717,6 @@ class ProvinceViewSet(_GeographyViewSet):
 
 
 class CityViewSet(_GeographyViewSet):
-    """Cities, filterable by province for the cascading selects."""
-
     queryset = City.objects.select_related("province")
     serializer_class = CitySerializer
 
@@ -625,8 +728,6 @@ class CityViewSet(_GeographyViewSet):
                 queryset = queryset.filter(province_id=province)
             else:
                 queryset = queryset.filter(province__name=province)
-        # Newest rows first within each province so the just-added city shows
-        # up at the top of the list and the parent dropdown.
         return queryset.order_by("-sort_order", "-id")
 
     def perform_destroy(self, instance):
@@ -640,8 +741,6 @@ class CityViewSet(_GeographyViewSet):
 
 
 class DistrictViewSet(_GeographyViewSet):
-    """Districts, filterable by city (and by province, for convenience)."""
-
     queryset = District.objects.select_related("city", "city__province")
     serializer_class = DistrictSerializer
 
@@ -665,11 +764,6 @@ class DistrictViewSet(_GeographyViewSet):
         return queryset.order_by("-sort_order", "-id")
 
     def perform_destroy(self, instance):
-        """Refuse to remove a district that properties still point at.
-
-        Property.district is PROTECT, so the delete would fail at the database
-        level anyway; catching it here returns a message the UI can show.
-        """
         if instance.properties.exists():
             from rest_framework.exceptions import ValidationError
 
@@ -681,50 +775,7 @@ class DistrictViewSet(_GeographyViewSet):
 
 
 class LocationTreeView(APIView):
-    """The whole geography in one call, for cascading selects.
-
-    Returns provinces, each with its cities, each with its districts. One
-    request is enough to populate all three dropdowns, which matters because the
-    property form needs them before the first field can be drawn.
-    """
-
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        provinces = (
-            Province.objects.filter(is_active=True)
-            .prefetch_related(
-                Prefetch("cities", queryset=City.objects.filter(is_active=True)),
-                Prefetch(
-                    "cities__districts",
-                    queryset=District.objects.filter(is_active=True),
-                ),
-            )
-        )
-
-        return Response(
-            [
-                {
-                    "id": province.id,
-                    "name": province.name,
-                    "displayName": province.display_name,
-                    "cities": [
-                        {
-                            "id": city.id,
-                            "name": city.name,
-                            "displayName": city.display_name,
-                            "districts": [
-                                {
-                                    "id": district.id,
-                                    "name": district.name,
-                                    "displayName": district.display_name,
-                                }
-                                for district in city.districts.all()
-                            ],
-                        }
-                        for city in province.cities.all()
-                    ],
-                }
-                for province in provinces
-            ]
-        )
+        return Response(cached_location_tree())

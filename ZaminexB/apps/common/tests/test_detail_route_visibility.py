@@ -1,15 +1,3 @@
-"""A row hidden from a list must still be reachable by its own id.
-
-Both the reference-data endpoints and the follow-up endpoint narrow their
-queryset for the list view — active rows only, non-archived only. Applying that
-narrowing to detail routes as well made a row unreachable the moment it was
-switched off: the management screen could deactivate a district and then be
-unable to delete or restore it, and an archived follow-up could never be
-unarchived.
-
-These tests pin the corrected behaviour.
-"""
-
 import io
 
 from django.contrib.auth import get_user_model
@@ -62,7 +50,6 @@ class ReferenceDataDetailRouteTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_a_deactivated_row_can_still_be_deleted(self):
-        """The bug: the delete button did nothing once a row was switched off."""
         self._deactivate()
         response = self.client.delete(f"/basics/api/districts/{self.district.pk}/")
         self.assertEqual(response.status_code, 204)
@@ -79,7 +66,9 @@ class ReferenceDataDetailRouteTests(TestCase):
         self.assertTrue(self.district.is_active)
 
     def test_the_same_holds_for_attributes(self):
-        attribute = Attribute.objects.filter(is_core=False).first()
+        attribute = Attribute.objects.create(
+            name="unbound_vis", display_name="ویژگی آزاد", data_type="text"
+        )
         self.client.patch(
             f"/basics/api/attributes/{attribute.pk}/",
             {"isActive": False},
@@ -115,39 +104,37 @@ class ArchivedFollowUpDetailRouteTests(TestCase):
 
     def _archive(self):
         response = self.client.post(
-            f"/followupa/api/followups/{self.followup.pk}/archive/"
+            f"/followups/api/followups/{self.followup.pk}/archive/"
         )
         self.assertEqual(response.status_code, 200)
 
     def test_an_archived_followup_is_hidden_from_the_default_list(self):
         self._archive()
-        listed = self.client.get("/followupa/api/followups/").json()
+        listed = self.client.get("/followups/api/followups/").json()
         rows = listed["results"] if isinstance(listed, dict) else listed
         self.assertNotIn(self.followup.pk, [row["id"] for row in rows])
 
     def test_it_appears_in_the_archived_list(self):
         self._archive()
-        listed = self.client.get("/followupa/api/followups/?archived=true").json()
+        listed = self.client.get("/followups/api/followups/?archived=true").json()
         rows = listed["results"] if isinstance(listed, dict) else listed
         self.assertIn(self.followup.pk, [row["id"] for row in rows])
 
     def test_an_archived_followup_can_still_be_fetched(self):
         self._archive()
-        response = self.client.get(f"/followupa/api/followups/{self.followup.pk}/")
+        response = self.client.get(f"/followups/api/followups/{self.followup.pk}/")
         self.assertEqual(response.status_code, 200)
 
     def test_an_archived_followup_can_be_unarchived(self):
-        """Otherwise archiving was a one-way trip."""
         self._archive()
         response = self.client.post(
-            f"/followupa/api/followups/{self.followup.pk}/unarchive/"
+            f"/followups/api/followups/{self.followup.pk}/unarchive/"
         )
         self.assertEqual(response.status_code, 200)
         self.followup.refresh_from_db()
         self.assertFalse(self.followup.is_archived)
 
     def test_an_archived_followup_can_be_deleted(self):
-        """The bug: the delete button 404'd on anything archived."""
         self._archive()
-        response = self.client.delete(f"/followupa/api/followups/{self.followup.pk}/")
+        response = self.client.delete(f"/followups/api/followups/{self.followup.pk}/")
         self.assertEqual(response.status_code, 204)

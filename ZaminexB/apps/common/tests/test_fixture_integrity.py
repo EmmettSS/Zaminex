@@ -1,14 +1,3 @@
-"""Guards for the database-migration tooling (phase 1).
-
-These tests lock in the two behaviours that make a SQLite → PostgreSQL move
-reproducible:
-
-  * loading a fixture must not fabricate activity-log entries, and
-  * the seed fixture must keep explicit primary keys.
-
-Both are backend-independent, so they run identically on PostgreSQL.
-"""
-
 import io
 import json
 from pathlib import Path
@@ -18,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
 
-from apps.common.models import ActivityLog
+from apps.activity.models import ActivityLog
 from apps.properties.models import Property
 
 User = get_user_model()
@@ -27,15 +16,12 @@ FIXTURE_PATH = Path(settings.BASE_DIR) / "fixtures" / "seed_data.json"
 
 
 class RawSignalGuardTests(TestCase):
-    """`loaddata` must not generate activity logs for restored rows."""
-
     def test_loading_a_fixture_does_not_create_activity_logs(self):
         consultant = User.objects.create_user(
             username="fixture-agent", password="x", role="AGENT"
         )
         ActivityLog.objects.all().delete()
 
-        # A normal save is expected to log.
         prop = Property.objects.create(
             title="ملک تست",
             internal_code="FIXTURE-1",
@@ -53,8 +39,6 @@ class RawSignalGuardTests(TestCase):
             "a genuine create should be recorded in the activity feed",
         )
 
-        # Serialise the real row so the fixture carries every field Django
-        # expects (including the auto_now_add timestamps).
         buffer = io.StringIO()
         call_command(
             "dumpdata",
@@ -65,7 +49,6 @@ class RawSignalGuardTests(TestCase):
         )
         serialised = buffer.getvalue()
 
-        # The same row arriving through loaddata (raw=True) must stay silent.
         Property.objects.all().delete()
         ActivityLog.objects.all().delete()
 
@@ -86,8 +69,6 @@ class RawSignalGuardTests(TestCase):
 
 
 class SeedFixtureTests(TestCase):
-    """The committed seed fixture must survive a round-trip unchanged."""
-
     def test_fixture_exists_and_is_valid_json(self):
         self.assertTrue(
             FIXTURE_PATH.exists(),
@@ -97,12 +78,6 @@ class SeedFixtureTests(TestCase):
         self.assertGreater(len(records), 0, "the seed fixture should not be empty")
 
     def test_fixture_preserves_explicit_primary_keys(self):
-        """IDs are referenced by the frontend, so they must not be renumbered.
-
-        Dumping with ``--natural-primary`` drops the ``pk`` field and lets
-        PostgreSQL reassign IDs on restore, which silently repoints properties
-        at the wrong consultant.
-        """
         records = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         missing = [r["model"] for r in records if r.get("pk") is None]
         self.assertEqual(
@@ -112,7 +87,6 @@ class SeedFixtureTests(TestCase):
         )
 
     def test_fixture_excludes_runtime_tables(self):
-        """Content types and permissions are recreated by `migrate`."""
         records = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         models = {r["model"] for r in records}
         for excluded in ("contenttypes.contenttype", "auth.permission", "sessions.session"):

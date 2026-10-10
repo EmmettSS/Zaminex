@@ -1,7 +1,3 @@
-// =============================================================================
-//  Constants (extracted exactly from App.tsx)
-// =============================================================================
-
 const PAGE_SIZE = 20;
 const TRANSACTION_TYPES = ["Sale", "Rent", "Off-Plan"];
 const PROPERTY_STATUSES = ["Available", "Reserved", "Sold", "Inactive"];

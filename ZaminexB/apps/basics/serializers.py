@@ -1,21 +1,10 @@
-"""Serializers for the reference-data API.
-
-Two shapes are exposed:
-
-* **management** serializers — full CRUD for the "اطلاعات پایه" admin screens.
-* **form-schema** serializers — the compact payload the property/listing forms
-  consume to render themselves (:class:`FormSchemaSerializer`).
-
-Field names stay ``camelCase`` on the wire to match the conventions already
-used by the existing endpoints.
-"""
-
 from __future__ import annotations
 
 from rest_framework import serializers
 
 from .models import (
     Attribute,
+    AttributeCategory,
     AttributeOption,
     DealType,
     DealTypeAttribute,
@@ -30,9 +19,29 @@ from .models import (
 )
 
 
-# ---------------------------------------------------------------------------
-#  Attribute options
-# ---------------------------------------------------------------------------
+class SystemKeyFromLabelMixin:
+    system_key_scope: str | None = None
+
+    def to_internal_value(self, data):
+        if self.instance is None and not (data or {}).get("name"):
+            label = (data or {}).get("displayName") or ""
+            scope = {}
+            scope_field = self.system_key_scope
+            if scope_field:
+                raw = (data or {}).get(scope_field)
+                if raw not in (None, ""):
+                    model_field = self.fields.get(scope_field)
+                    queryset = getattr(model_field, "queryset", None)
+                    if queryset is not None:
+                        parent = queryset.filter(pk=raw).first()
+                        if parent is not None:
+                            scope[scope_field] = parent
+
+            data = dict(data)
+            data["name"] = _unique_system_key(self.Meta.model, label, scope)
+
+        return super().to_internal_value(data)
+
 
 class AttributeOptionSerializer(serializers.ModelSerializer):
     displayName = serializers.CharField(source="display_name")
@@ -47,13 +56,6 @@ class AttributeOptionSerializer(serializers.ModelSerializer):
         fields = ["id", "value", "displayName", "sortOrder", "isActive"]
 
     def validate(self, attrs):
-        """Derive the stored key from the label, and keep labels unique.
-
-        The management UI only asks for the Persian label; making the operator
-        also invent an English key would be pointless friction. Two options
-        with the same label are indistinguishable in a dropdown, so those are
-        rejected even though their keys would differ.
-        """
         from django.utils.text import slugify
 
         attribute = self.context.get("attribute") or getattr(
@@ -87,13 +89,65 @@ class AttributeOptionSerializer(serializers.ModelSerializer):
         return attrs
 
 
-# ---------------------------------------------------------------------------
-#  Attributes
-# ---------------------------------------------------------------------------
+class AttributeCategorySerializer(SystemKeyFromLabelMixin, serializers.ModelSerializer):
+    displayName = serializers.CharField(source="display_name")
+    sortOrder = serializers.DecimalField(
+        source="sort_order", max_digits=10, decimal_places=2, required=False
+    )
+    isActive = serializers.BooleanField(source="is_active", required=False)
+    attributeCount = serializers.SerializerMethodField()
+    isSystem = serializers.BooleanField(source="is_system_category", read_only=True)
+    name = serializers.CharField(required=False)
+
+    class Meta:
+        model = AttributeCategory
+        fields = [
+            "id", "name", "displayName", "sortOrder", "isActive",
+            "attributeCount", "isSystem",
+        ]
+
+    def get_attributeCount(self, obj) -> int:
+        return obj.attribute_count()
+
+    def validate_name(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("کلید سیستمی نمی‌تواند خالی باشد.")
+
+        if self.instance and self.instance.name != value:
+            raise serializers.ValidationError(
+                "کلید سیستمی پس از ایجاد قابل تغییر نیست؛ نام نمایشی را ویرایش کنید."
+            )
+
+        clash = AttributeCategory.objects.filter(name=value)
+        if self.instance:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError("این کلید سیستمی قبلاً ثبت شده است.")
+        return value
+
+    def validate(self, attrs):
+        if "display_name" in attrs:
+            label = (attrs.get("display_name") or "").strip()
+            if not label:
+                raise serializers.ValidationError(
+                    {"displayName": "نام دسته‌بندی نمی‌تواند خالی باشد."}
+                )
+
+            clash = AttributeCategory.objects.filter(display_name=label)
+            if self.instance is not None:
+                clash = clash.exclude(pk=self.instance.pk)
+            if clash.exists():
+                raise serializers.ValidationError(
+                    {"displayName": f"دسته‌بندی «{label}» قبلاً ثبت شده است."}
+                )
+
+            attrs["display_name"] = label
+
+        return _fill_name_from_display(self, attrs, AttributeCategory)
+
 
 class AttributeSerializer(serializers.ModelSerializer):
-    """Full attribute representation used by the management screens."""
-
     displayName = serializers.CharField(source="display_name")
     dataType = serializers.ChoiceField(source="data_type", choices=Attribute.DataType.choices)
     inputType = serializers.ChoiceField(
@@ -111,27 +165,21 @@ class AttributeSerializer(serializers.ModelSerializer):
     isActive = serializers.BooleanField(source="is_active", required=False)
     options = AttributeOptionSerializer(many=True, read_only=True)
     usageCount = serializers.SerializerMethodField()
-    # Optional on create: derived from the Persian label, the same way the
-    # geography endpoints do it.
     name = serializers.CharField(required=False)
+    category = serializers.CharField(allow_blank=True, required=False)
 
     class Meta:
         model = Attribute
         fields = [
             "id", "name", "displayName", "dataType", "inputType", "filterType",
-            "entity", "unit", "isFacility", "isCore", "coreField",
+            "entity", "unit", "category", "isFacility", "isCore", "coreField",
             "sortOrder", "isActive", "options", "usageCount",
         ]
 
     def get_usageCount(self, obj) -> int:
-        """How many property/deal types reference this attribute.
-
-        Surfaced so the UI can warn before deactivating something in use.
-        """
         return obj.property_types.count() + obj.deal_types.count()
 
     def validate_name(self, value):
-        """`name` is a stable key: unique among live rows and immutable."""
         value = (value or "").strip()
         if not value:
             raise serializers.ValidationError("کلید سیستمی نمی‌تواند خالی باشد.")
@@ -148,15 +196,19 @@ class AttributeSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("این کلید سیستمی قبلاً ثبت شده است.")
         return value
 
-    def validate(self, attrs):
-        """Derive the key when omitted, then block edits that orphan data.
+    def validate_category(self, value):
+        key = (value or "").strip()
+        if not key:
+            raise serializers.ValidationError("انتخاب دسته‌بندی الزامی است.")
 
-        Changing an attribute's data type would leave existing rows in the
-        wrong typed column (an integer recorded in ``value_integer`` is
-        invisible once the attribute claims to be text).
-        """
-        # Two attributes sharing a label are indistinguishable in the admin
-        # list, so labels are unique too — not just the generated key.
+        category = AttributeCategory.objects.filter(name=key).first()
+        if category is None:
+            raise serializers.ValidationError(
+                "دسته‌بندی انتخاب‌شده وجود ندارد یا حذف شده است."
+            )
+        return category.name
+
+    def validate(self, attrs):
         label = (attrs.get("display_name") or "").strip()
         if label:
             clash = Attribute.objects.filter(display_name=label)
@@ -170,8 +222,6 @@ class AttributeSerializer(serializers.ModelSerializer):
         if attrs.get("is_facility"):
             attrs["data_type"] = Attribute.DataType.BOOLEAN
 
-        # The model defaults to «بدون فیلتر». A newly created field should
-        # still appear in list filters unless the operator *sent* none.
         if self.instance is None and "filter_type" not in attrs:
             data_type = attrs.get("data_type") or Attribute.DataType.TEXT
             attrs["filter_type"] = {
@@ -226,8 +276,6 @@ class AttributeSerializer(serializers.ModelSerializer):
 
 
 class AttributeMiniSerializer(serializers.ModelSerializer):
-    """Compact attribute payload embedded in form schemas."""
-
     displayName = serializers.CharField(source="display_name")
     dataType = serializers.CharField(source="data_type")
     inputType = serializers.CharField(source="input_type")
@@ -252,10 +300,6 @@ class AttributeMiniSerializer(serializers.ModelSerializer):
             for option in obj.options.filter(is_active=True)
         ]
 
-
-# ---------------------------------------------------------------------------
-#  Usages / types / deal types
-# ---------------------------------------------------------------------------
 
 class PropertyUsageSerializer(serializers.ModelSerializer):
     displayName = serializers.CharField(source="display_name")
@@ -299,7 +343,6 @@ class PropertyTypeSerializer(serializers.ModelSerializer):
         return obj.attribute_links.filter(is_active=True).count()
 
     def get_propertyCount(self, obj) -> int:
-        """Existing properties of this type — the UI warns before deactivating."""
         return obj.properties.count()
 
 
@@ -325,10 +368,6 @@ class DealTypeSerializer(serializers.ModelSerializer):
     def get_listingCount(self, obj) -> int:
         return obj.listings.count()
 
-
-# ---------------------------------------------------------------------------
-#  Attribute bindings
-# ---------------------------------------------------------------------------
 
 class PropertyTypeAttributeSerializer(serializers.ModelSerializer):
     propertyType = serializers.PrimaryKeyRelatedField(
@@ -382,17 +421,7 @@ class DealTypeAttributeSerializer(serializers.ModelSerializer):
         return value
 
 
-# ---------------------------------------------------------------------------
-#  Form schema — what the dynamic forms consume
-# ---------------------------------------------------------------------------
-
 class FormFieldSerializer(serializers.Serializer):
-    """One field in a dynamically generated form.
-
-    Built from a ``*TypeAttribute`` link so it carries both the attribute
-    definition and the per-type overrides (required, ordering).
-    """
-
     id = serializers.IntegerField(source="attribute.id")
     name = serializers.CharField(source="attribute.name")
     displayName = serializers.CharField(source="attribute.display_name")
@@ -422,8 +451,6 @@ class FormFieldSerializer(serializers.Serializer):
 
 
 class SearchFilterSerializer(serializers.Serializer):
-    """One filter in a dynamically generated search bar."""
-
     id = serializers.IntegerField(source="attribute.id")
     name = serializers.CharField(source="attribute.name")
     displayName = serializers.CharField(source="attribute.display_name")
@@ -450,54 +477,6 @@ class SearchFilterSerializer(serializers.Serializer):
         ]
 
 
-# ---------------------------------------------------------------------------
-#  Geography
-# ---------------------------------------------------------------------------
-
-class SystemKeyFromLabelMixin:
-    """Derive the system key (``name``) before per-field validation runs.
-
-    The management UI only asks for the Persian label — inventing an English
-    key is not something an operator should have to do. ``validate()`` is the
-    natural place to fill it in, but it runs *after* every field has been
-    validated: if ``name`` is ever treated as required, the request is already
-    rejected with a bare "این مقدار لازم است." that names a field the form does
-    not even show, and the autofill is never reached.
-
-    Supplying the key here — in ``to_internal_value``, before field validation
-    — makes the contract robust regardless of how ``name`` is declared, so the
-    label the operator typed is always enough to create a row.
-    """
-
-    #: Model field that scopes uniqueness (``province`` for a city, ``city``
-    #: for a district). ``None`` means the key is unique table-wide.
-    system_key_scope: str | None = None
-
-    def to_internal_value(self, data):
-        # Only on create: an existing row keeps its key, which may already be
-        # referenced elsewhere.
-        if self.instance is None and not (data or {}).get("name"):
-            label = (data or {}).get("displayName") or ""
-            scope = {}
-            scope_field = self.system_key_scope
-            if scope_field:
-                raw = (data or {}).get(scope_field)
-                # Resolve the parent only when it is a usable id; an invalid or
-                # missing parent is reported by the field itself, in Persian.
-                if raw not in (None, ""):
-                    model_field = self.fields.get(scope_field)
-                    queryset = getattr(model_field, "queryset", None)
-                    if queryset is not None:
-                        parent = queryset.filter(pk=raw).first()
-                        if parent is not None:
-                            scope[scope_field] = parent
-
-            data = dict(data)
-            data["name"] = _unique_system_key(self.Meta.model, label, scope)
-
-        return super().to_internal_value(data)
-
-
 class ProvinceSerializer(SystemKeyFromLabelMixin, serializers.ModelSerializer):
     displayName = serializers.CharField(source="display_name")
     sortOrder = serializers.DecimalField(
@@ -515,11 +494,6 @@ class ProvinceSerializer(SystemKeyFromLabelMixin, serializers.ModelSerializer):
         return obj.cities.count()
 
     def validate(self, attrs):
-        """`name` is a system key; derive it from the label when omitted.
-
-        The management UI only asks for the Persian label, so requiring the
-        operator to also invent an English key would be pointless friction.
-        """
         return _fill_name_from_display(self, attrs, Province)
 
 
@@ -527,9 +501,6 @@ class CitySerializer(SystemKeyFromLabelMixin, serializers.ModelSerializer):
     system_key_scope = "province"
 
     displayName = serializers.CharField(source="display_name")
-    # Spell out the parent errors in Persian. DRF's defaults ("این مقدار لازم
-    # است.", "pk نامعتبر ...") name no field, so a city that failed because no
-    # province was chosen read as an unexplained failure in the UI.
     province = serializers.PrimaryKeyRelatedField(
         queryset=Province.objects.all(),
         error_messages={
@@ -601,7 +572,6 @@ class DistrictSerializer(SystemKeyFromLabelMixin, serializers.ModelSerializer):
         ]
 
     def get_propertyCount(self, obj) -> int:
-        """Existing properties here — the UI warns before deleting."""
         return obj.properties.count()
 
     def validate(self, attrs):
@@ -609,12 +579,6 @@ class DistrictSerializer(SystemKeyFromLabelMixin, serializers.ModelSerializer):
 
 
 def _fill_name_from_display(serializer, attrs, model, scope_field=None):
-    """Reject duplicate labels, then derive a system key when none is given.
-
-    The operator only types the Persian label, so that is what has to be unique
-    from their point of view: two «سعادت‌آباد» in one city are indistinguishable
-    in a dropdown even if their generated keys differ.
-    """
     from django.utils.text import slugify
 
     label = (attrs.get("display_name") or "").strip()
@@ -627,7 +591,6 @@ def _fill_name_from_display(serializer, attrs, model, scope_field=None):
         if value is not None:
             scope[scope_field] = value
 
-    # --- duplicate label check -------------------------------------------
     if label:
         clash = model.objects.filter(display_name=label, **scope)
         if serializer.instance is not None:
@@ -641,7 +604,6 @@ def _fill_name_from_display(serializer, attrs, model, scope_field=None):
         return attrs
 
     if serializer.instance is not None:
-        # Editing: keep the existing key, it may already be referenced.
         return attrs
 
     attrs["name"] = _unique_system_key(model, label, scope)
@@ -649,19 +611,6 @@ def _fill_name_from_display(serializer, attrs, model, scope_field=None):
 
 
 def _unique_system_key(model, label: str, scope: dict | None = None) -> str:
-    """A stable, collision-free ``name`` derived from the Persian label.
-
-    ``slugify`` returns an empty string for a label made only of characters it
-    strips (punctuation, ZWNJ, symbols), so the model name is used as the base
-    in that case. The suffix loop then guarantees uniqueness — it consults
-    ``all_objects`` so a soft-deleted row still reserves its key and restoring
-    it can never collide with a newer one.
-
-    The result is trimmed to the column width. A generated key must never be
-    the reason a save fails: an over-long label would otherwise reach the
-    database as an oversized ``varchar(100)`` and surface as a 500 instead of
-    a validation message the operator can act on.
-    """
     from django.utils.text import slugify
 
     scope = scope or {}

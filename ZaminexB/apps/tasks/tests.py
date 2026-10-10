@@ -5,7 +5,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.accounts.models import UserRole
-from apps.common.models import ActivityLog
+from apps.activity.models import ActivityLog
 from apps.common.thread_locals import clear_current_user, set_current_user
 from apps.tasks.history import task_history_items
 from apps.tasks.models import Task
@@ -249,8 +249,6 @@ class TaskHistoryAPITests(TestCase):
 
 
 class TaskDueDateRangeApiTests(TestCase):
-    """Server-side inclusive due-date range filtering for "وظایف من"."""
-
     @classmethod
     def setUpTestData(cls):
         cls.admin = User.objects.create_user(
@@ -262,7 +260,6 @@ class TaskDueDateRangeApiTests(TestCase):
         cls.stranger = User.objects.create_user(
             username="range_stranger", password="pw", role=UserRole.AGENT
         )
-        # Five tasks on consecutive days, all assigned to cls.agent.
         cls.days = [
             datetime.date(2026, 7, 15),
             datetime.date(2026, 7, 18),
@@ -280,9 +277,6 @@ class TaskDueDateRangeApiTests(TestCase):
             )
             for d in cls.days
         ]
-        # A task belonging to another consultant. It is created by that
-        # consultant (not the admin), so an admin can still see it but a
-        # different consultant must never receive it through the API.
         cls.other_task = Task.objects.create(
             title="stranger task",
             assigned_to=cls.stranger,
@@ -301,15 +295,12 @@ class TaskDueDateRangeApiTests(TestCase):
 
     def test_inclusive_both_endpoints(self):
         self.client.force_authenticate(user=self.admin)
-        # Scope to the test agent so the assertions are isolated from other
-        # rows in the shared test database.
         resp = self.client.get(
             "/tasks/api/tasks/?assignedTo=%s&dueDateFrom=2026-07-18&dueDateTo=2026-07-20"
             % self.agent.id
         )
         self.assertEqual(resp.status_code, 200, resp.content)
         ids = self._ids(resp)
-        # The 18th, 19th and 20th are included (both ends inclusive).
         self.assertEqual(
             ids,
             {self.tasks[1].id, self.tasks[2].id, self.tasks[3].id},
@@ -338,7 +329,6 @@ class TaskDueDateRangeApiTests(TestCase):
         self.assertEqual(self._ids(resp), set())
 
     def test_combines_with_status_filter(self):
-        # Mark the 19th completed; a PENDING-only range query must drop it.
         self.tasks[2].status = Task.Status.COMPLETED
         self.tasks[2].save()
         self.client.force_authenticate(user=self.admin)
@@ -350,7 +340,6 @@ class TaskDueDateRangeApiTests(TestCase):
         self.assertEqual(self._ids(resp), {self.tasks[1].id, self.tasks[3].id})
 
     def test_consultant_scope_is_enforced(self):
-        # A consultant only ever sees their own tasks even with the range.
         self.client.force_authenticate(user=self.agent)
         resp = self.client.get(
             "/tasks/api/tasks/?assignedTo=%s&dueDateFrom=2026-07-18&dueDateTo=2026-07-20"
@@ -366,8 +355,6 @@ class TaskDueDateRangeApiTests(TestCase):
 
     def test_stranger_cannot_see_other_consultant_tasks(self):
         self.client.force_authenticate(user=self.stranger)
-        # No explicit assignedTo: server restricts non-admins to tasks they
-        # are assigned to (or created). The other agent's task must be absent.
         resp = self.client.get("/tasks/api/tasks/?dueDateFrom=2026-07-18&dueDateTo=2026-07-20")
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertNotIn(self.other_task.id, self._ids(resp))
@@ -375,7 +362,6 @@ class TaskDueDateRangeApiTests(TestCase):
 
     def test_invalid_date_returns_400(self):
         self.client.force_authenticate(user=self.admin)
-        # 2026-13-40 is not a real date; Django's parse_date rejects it.
         resp = self.client.get("/tasks/api/tasks/?dueDateFrom=2026-13-40")
         self.assertEqual(resp.status_code, 400, resp.content)
         self.assertIn("dueDateFrom", resp.json())

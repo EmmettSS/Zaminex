@@ -1,3 +1,5 @@
+import re
+
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import serializers
@@ -10,14 +12,15 @@ from apps.basics.models import (
     PropertyUsage,
 )
 from apps.common.attribute_serializers import AttributeValuesMixin
-from apps.common.metrics import build_neighborhood_price_stats_map, property_market_metrics
+from apps.analytics.metrics import (
+    cached_neighborhood_price_stats_map,
+    property_market_metrics,
+)
 
 from .models import Property, PropertyAppraisalReport, PropertyAttributeValue, PropertyImage
 
 User = get_user_model()
 
-# Reverse of the mapping used by `link_properties_to_basics`: keeps the legacy
-# Property.property_type column in sync when the new reference field is set.
 LEGACY_TYPE_BY_NAME = {
     "apartment": "APARTMENT",
     "villa": "VILLA",
@@ -50,14 +53,6 @@ class PropertyImageSerializer(serializers.ModelSerializer):
 
 
 class PropertyAppraisalReportSerializer(serializers.ModelSerializer):
-    """Metadata of the (single) appraisal PDF attached to a property.
-
-    `url` points at the authenticated download endpoint rather than the raw
-    media path: it re-checks read access on every request, keeps the
-    consultant's original filename in the Content-Disposition, and works
-    uniformly for the download button and the inline preview.
-    """
-
     url = serializers.SerializerMethodField()
     fileName = serializers.CharField(source="original_filename", read_only=True)
     fileSize = serializers.IntegerField(source="file_size", read_only=True)
@@ -86,7 +81,6 @@ class PropertyAppraisalReportSerializer(serializers.ModelSerializer):
         return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
 
 class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
-    # --- dynamic attributes (phase 3) --------------------------------------
     attribute_value_model = PropertyAttributeValue
     attribute_owner_field = "property"
     attribute_entity = Attribute.Entity.PROPERTY
@@ -94,9 +88,6 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
     attributes = serializers.SerializerMethodField()
     attributeDetails = serializers.SerializerMethodField()
 
-    # Reference-data links. `propertyTypeRef` is the new source of truth;
-    # the legacy `type` column is still written for backwards compatibility
-    # until every reader has moved over.
     propertyTypeRef = serializers.PrimaryKeyRelatedField(
         source="property_type_ref",
         queryset=BasicsPropertyType.objects.all(),
@@ -126,10 +117,6 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
     constructionYear = serializers.IntegerField(source="built_year", required=False, allow_null=True)
     fullAddress = serializers.CharField(source="address", required=False, allow_blank=True)
     beds = serializers.IntegerField(source="rooms", required=False, allow_null=True)
-    # `district` stays the neighbourhood *name*: existing callers, the property
-    # list and the search filter all send and read a string, and phase 4 must
-    # not break them. `districtId` is the new foreign key; when it is supplied
-    # the name is derived from it, so the two can never disagree.
     district = serializers.CharField(source="neighborhood", required=False, allow_blank=True)
     districtId = serializers.PrimaryKeyRelatedField(
         source="district",
@@ -156,8 +143,6 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
     )
     isShared = serializers.BooleanField(source="is_shared", required=False)
 
-    # Owner contact. Optional on the wire for edit/backfill, but the `validate`
-    # hook below makes all three mandatory when a new property is created.
     ownerFirstName = serializers.CharField(
         source="owner_first_name", required=False, allow_blank=True
     )
@@ -178,11 +163,6 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
         source="deal_type",
         required=False,
     )
-    # `price` is no longer a stored value on the property: it is the headline
-    # sale figure of the property's listings, falling back to the legacy column
-    # for records created before the split. Exposing it under the original name
-    # keeps every existing consumer — the property list, the detail page, the
-    # comboboxes — working without a change.
     price = serializers.SerializerMethodField()
     propertyStatus = serializers.SerializerMethodField()
     consultantName = serializers.SerializerMethodField()
@@ -190,8 +170,6 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
     consultantRole = serializers.SerializerMethodField()
     date = serializers.DateTimeField(source="created_at", format="%Y-%m-%d", read_only=True)
     images = PropertyImageSerializer(many=True, read_only=True)
-    # Reverse one-to-one: DRF resolves it as None when no report is attached
-    # (see rest_framework.fields.get_attribute).
     appraisalReport = PropertyAppraisalReportSerializer(
         source="appraisal_report", read_only=True
     )
@@ -224,14 +202,12 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
         ]
 
     def get_price(self, obj):
-        """The headline sale price, derived from the property's listings."""
-        from apps.common.metrics import effective_sale_price
+        from apps.analytics.metrics import effective_sale_price
 
         price = effective_sale_price(obj)
         return str(price) if price is not None else None
 
     def get_locationPath(self, obj):
-        """"استان / شهر / محله" when the property is linked to the hierarchy."""
         return obj.district.full_path if obj.district_id else None
 
     def get_propertyStatus(self, obj):
@@ -252,7 +228,7 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
     def _market_metrics(self, obj):
         cache = getattr(self, "_neighborhood_avg_cache", None)
         if cache is None:
-            cache = build_neighborhood_price_stats_map()
+            cache = cached_neighborhood_price_stats_map()
             setattr(self, "_neighborhood_avg_cache", cache)
         if not hasattr(self, "_property_metrics_cache"):
             setattr(self, "_property_metrics_cache", {})
@@ -290,9 +266,6 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
         if "rooms" in attrs and attrs["rooms"] is None:
             attrs["rooms"] = 0
 
-        # Owner contact is mandatory when creating a property. It is not forced
-        # on updates so existing rows and partial edits (which may predate the
-        # field) can still be saved; the front-end form prompts for it.
         if self.instance is None:
             missing = {}
             for field, label in (
@@ -305,7 +278,17 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
             if missing:
                 raise serializers.ValidationError(missing)
 
-        # Consultants cannot change the consultant field on shared properties.
+        phone = str(attrs.get("owner_phone") or "").strip()
+        if phone and not re.fullmatch(r"09\d{9}", phone):
+            raise serializers.ValidationError(
+                {
+                    "owner_phone": (
+                        "شماره موبایل مالک باید دقیقاً ۱۱ رقم و با ۰۹ شروع "
+                        "شود (مثال: 09121234567)."
+                    )
+                }
+            )
+
         request = self.context.get("request")
         if request and getattr(request.user, "role", "") != "ADMIN":
             attrs.pop("is_shared", None)
@@ -316,12 +299,6 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
             ):
                 attrs.pop("consultant")
 
-        # Keep the legacy `property_type` column and the new reference row in
-        # step. Readers still use the old column, so an update through either
-        # field has to end up consistent.
-        # When a district is chosen, its name is authoritative: it keeps the
-        # legacy `neighborhood` text correct without the caller having to send
-        # both, and stops the two from drifting apart.
         district = attrs.get("district")
         if district is not None:
             attrs["neighborhood"] = district.display_name
@@ -333,6 +310,25 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
             if legacy:
                 attrs["property_type"] = legacy
 
+        lat = attrs.get("latitude")
+        lng = attrs.get("longitude")
+        if lat is not None and lng is not None:
+            duplicates = Property.objects.filter(latitude=lat, longitude=lng)
+            if self.instance is not None:
+                duplicates = duplicates.exclude(pk=self.instance.pk)
+            duplicate = duplicates.first()
+            if duplicate is not None:
+                raise serializers.ValidationError(
+                    {
+                        "latitude": (
+                            f"این موقعیت قبلاً برای ملک «{duplicate.title}» "
+                            f"(کد {duplicate.internal_code}) ثبت شده است. "
+                            "موقعیت ملک نمی‌تواند با ملک دیگری یکی باشد؛ "
+                            "نقطهٔ دیگری روی نقشه انتخاب کنید یا مختصات دیگری وارد کنید."
+                        )
+                    }
+                )
+
         return attrs
 
     def to_internal_value(self, data):
@@ -343,8 +339,6 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
         if data.get("type") is not None:
             data["type"] = str(data["type"]).upper()
         return super().to_internal_value(data)
-
-    # -- persistence --------------------------------------------------------
 
     @transaction.atomic
     def create(self, validated_data):
@@ -366,3 +360,40 @@ class PropertySerializer(AttributeValuesMixin, serializers.ModelSerializer):
             instance, instance.property_type_ref, "attribute_links"
         )
         return instance
+
+_PROPERTY_LIST_EXCLUDED = {
+    "description",
+    "images",
+    "appraisalReport",
+    "attributes",
+    "attributeDetails",
+    "pricePerSqm",
+    "daysOnMarket",
+    "spatialDensityRatio",
+    "priceDeviationIndex",
+    "geoPrecisionFlag",
+    "engagementHeatScore",
+    "views",
+}
+
+
+class PropertyListSerializer(PropertySerializer):
+    imageUrl = serializers.SerializerMethodField()
+
+    class Meta(PropertySerializer.Meta):
+        fields = [
+            field
+            for field in PropertySerializer.Meta.fields
+            if field not in _PROPERTY_LIST_EXCLUDED
+        ] + ["imageUrl"]
+
+    def get_imageUrl(self, obj):
+        request = self.context.get("request")
+        first_image = obj.images.first()
+        if first_image is not None and first_image.image:
+            url = first_image.image.url
+            return request.build_absolute_uri(url) if request else url
+        return None
+
+    def get_imagesCount(self, obj):
+        return len(obj.images.all())

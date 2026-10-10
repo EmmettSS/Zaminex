@@ -1,5 +1,3 @@
-"""API tests: permissions, form schemas and the management endpoints."""
-
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -15,12 +13,12 @@ from apps.basics.models import (
     PropertyUsage,
 )
 
+from apps.common.testing import CacheClearingMixin
+
 User = get_user_model()
 
 
-class BasicsAPITestCase(TestCase):
-    """Shared fixture: one usage, two types, a deal type and some attributes."""
-
+class BasicsAPITestCase(CacheClearingMixin, TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.admin = User.objects.create_user(
@@ -85,7 +83,6 @@ class BasicsAPITestCase(TestCase):
             input_type=Attribute.InputType.PRICE,
         )
 
-        # Apartment gets everything; land deliberately has no `rooms`.
         for attribute, order in [(cls.area, 10), (cls.rooms, 20), (cls.parking, 30), (cls.doc, 40)]:
             PropertyTypeAttribute.objects.create(
                 property_type=cls.apartment,
@@ -149,7 +146,6 @@ class PropertyFormSchemaTests(BasicsAPITestCase):
         self.client.force_login(self.agent)
 
     def test_apartment_exposes_rooms_and_land_does_not(self):
-        """The client's example, enforced end to end."""
         apartment = self.client.get(
             "/basics/api/schema/property-form/?propertyType=apartment"
         ).json()
@@ -336,7 +332,6 @@ class AttributeManagementTests(BasicsAPITestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_the_system_key_cannot_be_changed_after_creation(self):
-        """Stored rows reference it, so renaming would orphan them."""
         response = self.client.patch(
             f"/basics/api/attributes/{self.parking.pk}/",
             {"name": "renamed"},
@@ -385,16 +380,23 @@ class AttributeManagementTests(BasicsAPITestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_deleting_an_attribute_is_a_soft_delete(self):
-        response = self.client.delete(f"/basics/api/attributes/{self.doc.pk}/")
+        attr = Attribute.objects.create(
+            name="unbound_del", display_name="حذف آزاد", data_type=Attribute.DataType.TEXT
+        )
+        response = self.client.delete(f"/basics/api/attributes/{attr.pk}/")
         self.assertEqual(response.status_code, 204)
-        self.assertFalse(Attribute.objects.filter(pk=self.doc.pk).exists())
-        self.assertTrue(Attribute.all_objects.filter(pk=self.doc.pk).exists())
+        self.assertFalse(Attribute.objects.filter(pk=attr.pk).exists())
+        self.assertTrue(Attribute.all_objects.filter(pk=attr.pk).exists())
 
     def test_a_soft_deleted_attribute_can_be_restored(self):
-        self.client.delete(f"/basics/api/attributes/{self.doc.pk}/")
-        response = self.client.post(f"/basics/api/attributes/{self.doc.pk}/restore/")
+        attr = Attribute.objects.create(
+            name="unbound_restore", display_name="بازیابی آزاد",
+            data_type=Attribute.DataType.TEXT,
+        )
+        self.client.delete(f"/basics/api/attributes/{attr.pk}/")
+        response = self.client.post(f"/basics/api/attributes/{attr.pk}/restore/")
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(Attribute.objects.filter(pk=self.doc.pk).exists())
+        self.assertTrue(Attribute.objects.filter(pk=attr.pk).exists())
 
     def test_attributes_can_be_filtered_by_entity(self):
         payload = self.client.get("/basics/api/attributes/?entity=listing").json()

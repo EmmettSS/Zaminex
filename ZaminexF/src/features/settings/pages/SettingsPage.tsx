@@ -16,7 +16,7 @@ import { Pagination } from "../../../shared/components/Pagination";
 import { DistrictCombobox } from "../../../shared/components/ui/DistrictCombobox";
 import { apiFetch, readJson, apiErrorMessage, getCsrfToken } from "../../../shared/lib/apiClient";
 import { toast } from "../../../shared/lib/utils";
-import { Building2, LayoutDashboard, FileText, CheckSquare, Users, BarChart3, Settings, Bell, Search, LogOut, Plus, ChevronLeft, ChevronDown, ChevronRight, Clock, CheckCircle2, AlertCircle, MoreHorizontal, MapPin, Eye, Edit2, Trash2, Archive, Phone, Mail, Calendar, TrendingUp, Activity, Command, Star, List, LayoutGrid, Download, Shield, User, Lock, Key, RefreshCw, Circle, Zap, Target, Award, Upload, Check, AlertTriangle, Info, XCircle, Loader2, CircleCheck, TriangleAlert, Columns, Send, BellRing, X, ChevronUp, SlidersHorizontal, ArrowUpRight, Layers, MessageSquare, Sparkles, GripVertical, MoreVertical, Building, History, Flame, Image, Filter } from "lucide-react";
+import { Building2, LayoutDashboard, FileText, CheckSquare, Users, BarChart3, Settings, Bell, Search, LogOut, Plus, ChevronLeft, ChevronDown, ChevronRight, Clock, CheckCircle2, AlertCircle, MoreHorizontal, MapPin, Eye, Edit2, Trash2, Archive, Phone, Mail, Calendar, TrendingUp, Activity, Command, Star, List, LayoutGrid, Download, Shield, User, Lock, Key, RefreshCw, Circle, Zap, Target, Award, Upload, Check, AlertTriangle, Info, XCircle, Loader2, CircleCheck, TriangleAlert, Columns, Send, BellRing, X, ChevronUp, SlidersHorizontal, ArrowUpRight, Layers, MessageSquare, Sparkles, GripVertical, MoreVertical, Building, History, Flame, Image, Filter, Smartphone } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, ResponsiveContainer, CartesianGrid, XAxis, YAxis, Tooltip, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis, ReferenceLine, ScatterChart, Scatter, ZAxis, RadialBarChart, RadialBar } from "recharts";
 const EMPTY_COMPANY = {
   companyName: "",
@@ -28,13 +28,13 @@ const EMPTY_COMPANY = {
 
 function SettingsPage({ page, navigate, role, csrfToken }: { page: Page; navigate: (p: Page) => void; role: Role; csrfToken: string }) {
   const isAdmin = role === "admin";
-  const tabs: { label: string; page: Page }[] = [
+  const tabs: { label: string; page: Page; adminOnly?: boolean }[] = [
     { label: "فضای کاری", page: "settings-workspace" },
     { label: "دسترسی‌ها", page: "settings-permissions" },
+    { label: "گزینه‌های ورود", page: "settings-login-options", adminOnly: true },
   ];
+  const visibleTabs = tabs.filter((t) => !t.adminOnly || isAdmin);
 
-  // Real consultant capabilities, derived from backend queryset/action
-  // guards and the consultant sidebar — not a decorative matrix.
   const rolePermissions: { label: string; admin: boolean; consultant: boolean }[] = [
     { label: "ساخت ملک", admin: true, consultant: true },
     { label: "ویرایش ملک خود", admin: true, consultant: true },
@@ -60,9 +60,16 @@ function SettingsPage({ page, navigate, role, csrfToken }: { page: Page; navigat
   const [companyLoading, setCompanyLoading] = useState(false);
   const [companySaving, setCompanySaving] = useState(false);
 
+  const [loginMethod, setLoginMethod] = useState<"password" | "sms">("password");
+  const [selectedMethod, setSelectedMethod] = useState<"password" | "sms">("password");
+  const [smsConfigured, setSmsConfigured] = useState(false);
+  const [loginOptionsLoading, setLoginOptionsLoading] = useState(false);
+  const [savingLoginMethod, setSavingLoginMethod] = useState(false);
+
   useEffect(() => {
     if (page === "settings-users") navigate("settings-workspace");
-  }, [page, navigate]);
+    else if (page === "settings-login-options" && !isAdmin) navigate("settings-workspace");
+  }, [page, navigate, isAdmin]);
 
   useEffect(() => {
     if (page !== "settings-workspace") return;
@@ -94,6 +101,52 @@ function SettingsPage({ page, navigate, role, csrfToken }: { page: Page; navigat
 
   const setCompanyField = (k: string, v: string) => setCompany((p) => ({ ...p, [k]: v }));
 
+  const loadLoginOptions = useCallback(async () => {
+    setLoginOptionsLoading(true);
+    try {
+      const res = await apiFetch("/accounts/login-options/", { method: "GET" }, csrfToken);
+      const data = await readJson(res);
+      if (!res.ok) throw new Error(apiErrorMessage(data, "خطا در دریافت گزینه‌های ورود"));
+      const method = data.method === "sms" ? "sms" : "password";
+      setLoginMethod(method);
+      setSelectedMethod(method);
+      setSmsConfigured(Boolean(data.smsConfigured));
+    } catch (err: any) {
+      toast({ type: "error", message: err?.message || "خطا در دریافت گزینه‌های ورود" });
+    } finally {
+      setLoginOptionsLoading(false);
+    }
+  }, [csrfToken]);
+
+  useEffect(() => {
+    if (page !== "settings-login-options" || !isAdmin) return;
+    loadLoginOptions();
+  }, [page, isAdmin, loadLoginOptions]);
+
+  const saveLoginMethod = async () => {
+    if (selectedMethod === loginMethod) return;
+    setSavingLoginMethod(true);
+    try {
+      const res = await apiFetch(
+        "/accounts/login-options/",
+        { method: "PATCH", body: JSON.stringify({ method: selectedMethod }) },
+        csrfToken,
+      );
+      const data = await readJson(res);
+      if (!res.ok) throw new Error(apiErrorMessage(data, "خطا در ذخیره گزینه ورود"));
+      setLoginMethod(selectedMethod);
+      setSmsConfigured(Boolean(data.smsConfigured));
+      toast({
+        type: "success",
+        message: selectedMethod === "sms" ? "ورود با کد پیامکی فعال شد." : "ورود با رمز عبور فعال شد.",
+      });
+    } catch (err: any) {
+      toast({ type: "error", message: err?.message || "خطا در ذخیره گزینه ورود" });
+    } finally {
+      setSavingLoginMethod(false);
+    }
+  };
+
   const saveCompany = async () => {
     try {
       setCompanySaving(true);
@@ -117,7 +170,7 @@ function SettingsPage({ page, navigate, role, csrfToken }: { page: Page; navigat
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <PageHeader title="تنظیمات" />
-      <div className="flex gap-1 border-b border-border mb-5">{tabs.map((t) => <button key={t.page} onClick={() => navigate(t.page)} className={cx("px-4 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-colors", page === t.page ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{t.label}</button>)}</div>
+      <div className="flex gap-1 border-b border-border mb-5">{visibleTabs.map((t) => <button key={t.page} onClick={() => navigate(t.page)} className={cx("px-4 py-2.5 text-xs font-semibold border-b-2 -mb-px transition-colors", page === t.page ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{t.label}</button>)}</div>
       {page === "settings-workspace" && (
         <Card className="p-6 space-y-4">
           <h2 className="text-sm font-semibold">اطلاعات شرکت</h2>
@@ -170,12 +223,41 @@ function SettingsPage({ page, navigate, role, csrfToken }: { page: Page; navigat
           </Card>
         </div>
       )}
+      {page === "settings-login-options" && isAdmin && (
+        <Card className="p-6 space-y-5">
+          <div>
+            <h2 className="text-sm font-semibold">گزینه‌های ورود</h2>
+            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">مشخص کنید کاربران با رمز عبور وارد سامانه شوند یا با کد پیامکی یک‌بارمصرف. این انتخاب بلافاصله برای کل سامانه اعمال می‌شود.</p>
+          </div>
+          {loginOptionsLoading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground"><Loader2 size={16} className="animate-spin text-primary" />در حال بارگذاری گزینه‌های ورود…</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {[
+                  { key: "password" as const, icon: <Lock size={16} />, title: "ورود با رمز عبور", desc: "کاربر با نام کاربری و رمز عبور وارد سامانه می‌شود." },
+                  { key: "sms" as const, icon: <Smartphone size={16} />, title: "ورود با کد پیامکی", desc: "کد تأیید یک‌بارمصرف به شماره موبایل ثبت‌شدهٔ کاربر پیامک می‌شود." },
+                ].map((opt) => (
+                  <button key={opt.key} type="button" onClick={() => setSelectedMethod(opt.key)} className={cx("rounded-xl border p-4 text-right transition-all", selectedMethod === opt.key ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-border hover:border-primary/40")}>
+                    <div className="flex items-center gap-2 mb-1.5"><span className={selectedMethod === opt.key ? "text-primary" : "text-muted-foreground"}>{opt.icon}</span><span className="text-sm font-semibold">{opt.title}</span></div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{opt.desc}</p>
+                  </button>
+                ))}
+              </div>
+              {selectedMethod === "sms" && !smsConfigured && (
+                <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-700 leading-relaxed">تنظیمات سرویس پیامک (کلید API و شناسه قالب) هنوز تکمیل نشده است؛ تا وقتی این مقادیر وارد نشوند، ارسال کد تأیید ممکن نیست.</div>
+              )}
+              <div className="flex items-center justify-between gap-2 pt-3 border-t border-border">
+                <span className="text-xs text-muted-foreground">روش ورود فعال: {loginMethod === "sms" ? "کد پیامکی" : "رمز عبور"}</span>
+                <Btn variant="primary" onClick={saveLoginMethod} disabled={savingLoginMethod || loginOptionsLoading || selectedMethod === loginMethod}><Check size={13} />{savingLoginMethod ? "در حال ذخیره…" : "ذخیره گزینه ورود"}</Btn>
+              </div>
+            </>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
 
-// =============================================================================
-//  Consultant Portal
-// =============================================================================
 
 export { SettingsPage };

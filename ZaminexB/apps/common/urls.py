@@ -1,7 +1,7 @@
 from django.urls import path
 
-from .activity_views import ActivityLogListView, ActivityLogUserListView
-from .analytics_views import (
+from apps.activity.views import ActivityLogListView, ActivityLogUserListView
+from apps.analytics.views import (
     AIInsightView,
     AnalyticsDashboardView,
     ConsultantAnalyticsView,
@@ -9,13 +9,13 @@ from .analytics_views import (
     ListingAnalyticsView,
     PropertyAnalyticsView,
 )
+from apps.notifications.views import NotificationListView, NotificationMarkReadView
 from .views import (
     CompanySettingsView,
     DistrictListView,
     DistrictManageView,
+    GeocodeView,
     LoginStatsView,
-    NotificationListView,
-    NotificationMarkReadView,
     PasswordResetRequestView,
     AdminPasswordChangeView,
 )
@@ -25,6 +25,7 @@ urlpatterns = [
     path("districts/", DistrictListView.as_view(), name="districts-list"),
     path("districts/manage/", DistrictManageView.as_view(), name="districts-manage"),
     path("districts/manage/<int:pk>/", DistrictManageView.as_view(), name="districts-manage-detail"),
+    path("geocode/", GeocodeView.as_view(), name="geocode"),
     path("analytics/consultants/", ConsultantAnalyticsView.as_view(), name="analytics-consultants"),
     path("analytics/consultants/<int:pk>/", ConsultantDetailAnalyticsView.as_view(), name="analytics-consultant-detail"),
     path("analytics/properties/", PropertyAnalyticsView.as_view(), name="analytics-properties"),

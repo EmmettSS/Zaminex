@@ -4,15 +4,6 @@ import { JalaliDateInput } from "./JalaliDateInput";
 import { useEffect, useState } from "react";
 import { apiFetch } from "../../lib/apiClient";
 
-/**
- * The extra filters a property type contributes to the search bar, built from
- * `/basics/api/schema/search/`.
- *
- * Rendered with the same `SelectField` and bare `input` styling the surrounding
- * filter row already uses, so the generated controls sit in the existing
- * `grid-cols-6` layout without looking bolted on.
- */
-
 export type SearchFilterDef = {
   id: number;
   name: string;
@@ -26,7 +17,6 @@ export type SearchFilterDef = {
   options: { value: string; displayName: string }[];
 };
 
-/** Loads the filter definitions for one property type. */
 export function useSearchSchema(
   propertyTypeId: string | number | null | undefined,
   csrfToken?: string
@@ -51,8 +41,6 @@ export function useSearchSchema(
         const data = await res.json();
         if (!cancelled) setFilters(data.propertyFilters ?? []);
       } catch {
-        // Non-fatal: the bar keeps its built-in filters and simply shows no
-        // type-specific ones.
         if (!cancelled) setFilters([]);
       }
     })();
@@ -65,10 +53,7 @@ export function useSearchSchema(
   return filters;
 }
 
-/**
- * Turns the current values into the query parameters the API expects:
- * `attr_<name>`, `attr_<name>_min`, `attr_<name>_max`.
- */
+
 export function buildAttributeParams(values: Record<string, string>): string {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
@@ -79,7 +64,6 @@ export function buildAttributeParams(values: Record<string, string>): string {
 
 const RANGE_FILTERS = new Set(["range", "range_fast"]);
 
-/** Matches the plain inputs already used for the price range in the filter row. */
 const INPUT_CLASS =
   "w-full rounded-xl border border-border bg-input-background px-2.5 py-2 text-xs outline-none focus:ring-2 focus:ring-ring";
 
@@ -99,8 +83,6 @@ function DynamicSearchFilters({
       {filters.map((f) => {
         const label = f.unit ? `${f.displayName} (${f.unit})` : f.displayName;
 
-        // Booleans read as a yes/no choice rather than a checkbox: a filter
-        // needs three states — yes, no, and "don't care".
         if (f.dataType === "boolean") {
           return (
             <SelectField

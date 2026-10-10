@@ -1,4 +1,4 @@
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 
 from rest_framework import filters, permissions, status, viewsets
@@ -10,7 +10,9 @@ from apps.common.date_filters import (
     parse_gregorian_date,
     validate_date_range,
 )
+from apps.common.pagination import LargeListPagination
 from apps.common.thread_locals import set_current_user
+from apps.listings.models import Listing
 
 from .history import task_history_items
 from .models import Task
@@ -20,6 +22,7 @@ from .serializers import TaskSerializer
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = LargeListPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         "title",
@@ -41,9 +44,16 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         qs = Task.objects.select_related(
             "assigned_to",
+            "assigned_to__consultant_profile",
             "created_by",
+            "created_by__consultant_profile",
             "property",
-        ).all()
+        ).prefetch_related(
+            Prefetch(
+                "property__listings",
+                queryset=Listing.objects.select_related("deal_type"),
+            )
+        )
 
         if getattr(user, "role", "") != "ADMIN":
             qs = qs.filter(Q(assigned_to=user) | Q(created_by=user))
@@ -74,9 +84,6 @@ class TaskViewSet(viewsets.ModelViewSet):
         if task_type:
             qs = qs.filter(task_type=task_type.upper())
 
-        # Inclusive due-date range. Dates are Gregorian YYYY-MM-DD (the Jalali
-        # picker converts before sending). ``due_date`` is a DateField, so the
-        # comparison uses the existing (due_date, status) index.
         due_from = parse_gregorian_date(
             self.request.query_params.get("dueDateFrom"), "dueDateFrom"
         )
@@ -118,7 +125,6 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="history")
     def history(self, request, pk=None):
-        """Return chronological change history for a single task."""
         instance = self.get_object()
         return Response({"results": task_history_items(instance)}, status=status.HTTP_200_OK)
 
@@ -141,10 +147,8 @@ class TaskViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="types")
     def types(self, request):
-        """Return list of task types with Persian labels."""
         from .models import Task as TaskModel
-        
-        # Persian labels for task types
+
         persian_labels = {
             "VIEWING": "بازدید ملک",
             "DOCUMENT": "بررسی مدارک",

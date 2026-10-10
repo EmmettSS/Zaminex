@@ -1,4 +1,5 @@
 import shutil
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
@@ -168,14 +169,11 @@ class PropertyImageAccessTests(TestCase):
         from django.core.files.uploadedfile import SimpleUploadedFile
         client = APIClient()
         client.force_authenticate(user=user)
-        # A real 10x10 PNG so the Pillow content check passes.
         png = bytes.fromhex(
             "89504e470d0a1a0a0000000d494844520000000a0000000a0802000000025058ea"
             "0000001249444154789c63fccf800f30e1951db1d200412c0113b10a73130000000049454e44ae426082"
         )
         f = SimpleUploadedFile("t.png", png, content_type="image/png")
-        # DRF APIClient uses the testserver host by default; ALLOWED_HOSTS is
-        # locked down in test settings, so set it explicitly.
         return client.post(
             f"/properties/api/properties/{self.prop.id}/images/",
             {"images": f},
@@ -189,7 +187,6 @@ class PropertyImageAccessTests(TestCase):
 
     def test_stranger_cannot_upload(self):
         resp = self._upload(self.stranger)
-        # 403 if somehow visible, but the queryset hides it -> 404.
         self.assertIn(resp.status_code, (403, 404))
 
     def test_stranger_cannot_delete(self):
@@ -230,7 +227,6 @@ class PropertyImageAccessTests(TestCase):
         from django.core.files.uploadedfile import SimpleUploadedFile
         client = APIClient()
         client.force_authenticate(user=self.owner)
-        # Send a text file disguised as an image extension.
         fake = SimpleUploadedFile("x.png", b"not a real png", content_type="image/png")
         resp = client.post(
             f"/properties/api/properties/{self.prop.id}/images/",
@@ -241,8 +237,6 @@ class PropertyImageAccessTests(TestCase):
 
 
 class PropertyOwnerFieldsApiTests(TestCase):
-    """Owner name/surname/mobile are captured on the Property model."""
-
     def setUp(self):
         self.admin = User.objects.create_user(
             username="owner-admin", password="pw", role="ADMIN"
@@ -317,11 +311,46 @@ class PropertyOwnerFieldsApiTests(TestCase):
         self.assertEqual(data["ownerFirstName"], "سارا")
         self.assertEqual(data["ownerPhone"], "09129998877")
 
+    def test_owner_phone_must_be_11_digits_starting_09(self):
+        for bad in ("0912123456", "19121234567", "091212345678", "09121234a67", ""):
+            resp = self.client.post(
+                "/properties/api/properties/",
+                {
+                    "title": "ملک موبایل نامعتبر",
+                    "type": "APARTMENT",
+                    "transactionType": "SALE",
+                    "area": 80,
+                    "fullAddress": "تهران",
+                    "ownerFirstName": "علی",
+                    "ownerLastName": "رضایی",
+                    "ownerPhone": bad,
+                },
+                format="json",
+            )
+            
+            self.assertEqual(resp.status_code, 400, f"{bad!r}: {resp.content[:300]}")
+            self.assertIn("owner_phone", resp.json())
+        self.assertEqual(Property.objects.filter(title="ملک موبایل نامعتبر").count(), 0)
+
+    def test_partial_update_without_phone_is_not_blocked(self):
+        prop = Property.objects.create(
+            title="ملک بدون موبایل",
+            internal_code="ZF_9302",
+            consultant=self.admin,
+            property_type="APARTMENT",
+            deal_type="SALE",
+            area=80,
+            address="تهران",
+        )
+        resp = self.client.patch(
+            f"/properties/api/properties/{prop.id}/",
+            {"title": "فقط تغییر عنوان"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content[:400])
+
 
 class PropertyScopeAllAccessTests(TestCase):
-    """The consultant "همه املاک" tab reads every property but cannot mutate
-    another consultant's non-shared records."""
-
     def setUp(self):
         self.agent1 = User.objects.create_user(
             username="scope-agent1", password="pw", role="AGENT"
@@ -390,7 +419,6 @@ class PropertyScopeAllAccessTests(TestCase):
             {"title": "تغییر غیرمجاز"},
             format="json",
         )
-        # scope=all only widens reads; mutation stays owner/shared only -> 404.
         self.assertEqual(resp.status_code, 404)
 
     def test_consultant_cannot_delete_other_non_shared(self):
@@ -407,14 +435,6 @@ class PropertyScopeAllAccessTests(TestCase):
 
 
 class PropertyAppraisalReportApiTests(TestCase):
-    """The property-detail «گزارش کارشناسی» tab: one PDF per property.
-
-    Upload/delete follow the gallery-image permission (assigned consultant
-    or admin); download follows read access (admin, assigned consultant,
-    and every consultant when the property is shared).
-    """
-
-    # Smallest structurally valid PDF: magic header + EOF marker.
     PDF_BYTES = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< >>\n%%EOF\n"
 
     def setUp(self):
@@ -439,7 +459,6 @@ class PropertyAppraisalReportApiTests(TestCase):
             area=80,
             address="تهران",
         )
-        # Keep test uploads out of the repository's media directory.
         tmp = tempfile.mkdtemp(prefix="zaminex-appr-")
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         override = override_settings(MEDIA_ROOT=tmp)
@@ -477,10 +496,6 @@ class PropertyAppraisalReportApiTests(TestCase):
         self.assertIn("appraisal-report/download", body["url"])
         self.assertEqual(body["uploadedBy"], "appr-owner")
 
-        # Same property, second row would violate the 1:1 — re-upload on a
-        # different property is not needed; admin on the same property is
-        # exercised by the replacement test below.
-
     def test_upload_replaces_previous_file(self):
         from apps.properties.models import PropertyAppraisalReport
 
@@ -492,9 +507,6 @@ class PropertyAppraisalReportApiTests(TestCase):
         second = self._upload(self.owner, self._pdf(name="second.pdf"))
         self.assertEqual(second.status_code, 201, second.content[:400])
         self.assertEqual(second.json()["fileName"], "second.pdf")
-
-        # Exactly one row remains, pointing at the new file; the old PDF
-        # was removed from storage as well.
         self.assertEqual(
             PropertyAppraisalReport.objects.filter(property=self.prop).count(), 1
         )
@@ -509,7 +521,6 @@ class PropertyAppraisalReportApiTests(TestCase):
         self.assertIsNone(self._current_report())
 
     def test_upload_rejects_fake_pdf_content(self):
-        # Text bytes renamed to .pdf — must fail the magic-header check.
         resp = self._upload(self.owner, self._pdf(name="fake.pdf", content=b"<html>x</html>"))
         self.assertEqual(resp.status_code, 400, resp.content[:400])
         self.assertIsNone(self._current_report())
@@ -584,7 +595,6 @@ class PropertyAppraisalReportApiTests(TestCase):
         self.assertEqual(resp["Content-Type"], "application/pdf")
         disposition = resp["Content-Disposition"]
         self.assertIn("attachment", disposition)
-        # Non-ASCII filename is transmitted via the RFC 5987 filename* form.
         self.assertIn("filename*", disposition)
         self.assertIn("%DA%AF%D8%B2%D8%A7%D8%B1%D8%B4", disposition.upper())
 
@@ -600,8 +610,6 @@ class PropertyAppraisalReportApiTests(TestCase):
 
     def test_stranger_cannot_download_non_shared(self):
         self._upload(self.owner)
-        # scope=all lets a consultant resolve the property, but read access
-        # to the file itself is still owner/shared/admin only -> 403.
         resp = self._download(self.stranger, scope="all")
         self.assertEqual(resp.status_code, 403)
 
@@ -646,3 +654,166 @@ class PropertyAppraisalReportApiTests(TestCase):
         allowed = Client()
         allowed.force_login(self.owner)
         self.assertEqual(allowed.get(f"/media/{rel}").status_code, 200)
+
+
+class NextInternalCodePreviewTests(TestCase):
+    URL = "/properties/api/properties/next-internal-code/"
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="code-admin", password="pw", role="ADMIN"
+        )
+        self.agent = User.objects.create_user(
+            username="code-agent", password="pw", role="AGENT"
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+
+    def _preview(self, client=None):
+        resp = (client or self.client).get(self.URL)
+        self.assertEqual(resp.status_code, 200, resp.content[:400])
+        return resp.json()["internalCode"]
+
+    def test_first_code_is_start_of_sequence(self):
+        self.assertEqual(self._preview(), "ZF_1111")
+
+    def test_preview_matches_the_code_stored_on_save(self):
+        previewed = self._preview()
+        created = self.client.post(
+            "/properties/api/properties/",
+            {
+                "title": "ملک پیش‌نمایش کد",
+                "internalCode": "FORGED-1",
+                "type": "APARTMENT",
+                "transactionType": "SALE",
+                "area": 80,
+                "fullAddress": "ساری",
+                "ownerFirstName": "علی",
+                "ownerLastName": "رضایی",
+                "ownerPhone": "09121234567",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.content[:400])
+        self.assertEqual(created.json()["internalCode"], previewed)
+
+    def test_preview_advances_after_a_creation(self):
+        self._preview()
+        Property.objects.create(
+            title="ملک دوم",
+            internal_code="ZF_1111",
+            consultant=self.agent,
+            property_type="APARTMENT",
+            deal_type="SALE",
+            area=80,
+            address="ساری",
+        )
+        self.assertEqual(self._preview(), "ZF_1112")
+
+    def test_preview_skips_codes_containing_zero(self):
+        for code in ("ZF_1118", "ZF_1119"):
+            Property.objects.create(
+                title=f"ملک {code}",
+                internal_code=code,
+                consultant=self.agent,
+                property_type="APARTMENT",
+                deal_type="SALE",
+                area=80,
+                address="ساری",
+            )
+        self.assertEqual(self._preview(), "ZF_1121")
+
+    def test_agent_can_preview_too(self):
+        agent_client = APIClient()
+        agent_client.force_authenticate(user=self.agent)
+        self.assertEqual(self._preview(agent_client), "ZF_1111")
+
+    def test_anonymous_cannot_preview(self):
+        anon = APIClient()
+        resp = anon.get(self.URL)
+        self.assertEqual(resp.status_code, 403)
+
+
+class DuplicateLocationApiTests(TestCase):
+    BASE = {
+        "type": "APARTMENT",
+        "transactionType": "SALE",
+        "area": 80,
+        "fullAddress": "ساری، بلوار کشاورز",
+        "ownerFirstName": "علی",
+        "ownerLastName": "رضایی",
+        "ownerPhone": "09121234567",
+    }
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="duploc-admin", password="pw", role="ADMIN"
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.admin)
+
+    def _create(self, **extra):
+        payload = {"title": "ملک موقعیت", **self.BASE, **extra}
+        return self.client.post("/properties/api/properties/", payload, format="json")
+
+    def test_duplicate_location_is_rejected_on_create(self):
+        first = self._create(title="ملک اول", latitude="36.563421", longitude="53.060112")
+        self.assertEqual(first.status_code, 201, first.content[:400])
+
+        second = self._create(title="ملک دوم", latitude="36.563421", longitude="53.060112")
+        self.assertEqual(second.status_code, 400, second.content[:400])
+        body = second.json()
+        message = " ".join(
+            item for v in body.values() if isinstance(v, list) for item in v
+        )
+        self.assertIn("یکی باشد", message)
+        self.assertIn("ملک اول", message)
+        self.assertEqual(Property.objects.count(), 1)
+
+    def test_different_locations_are_allowed(self):
+        first = self._create(title="ملک اول", latitude="36.563421", longitude="53.060112")
+        second = self._create(title="ملک دوم", latitude="36.563422", longitude="53.060112")
+        self.assertEqual(first.status_code, 201, first.content[:400])
+        self.assertEqual(second.status_code, 201, second.content[:400])
+        self.assertEqual(Property.objects.count(), 2)
+
+    def test_update_to_another_property_location_is_rejected(self):
+        first = self._create(title="ملک اول", latitude="36.563421", longitude="53.060112")
+        second = self._create(title="ملک دوم", latitude="35.689198", longitude="51.389973")
+        second_id = second.json()["id"]
+
+        moved = self.client.patch(
+            f"/properties/api/properties/{second_id}/",
+            {"latitude": "36.563421", "longitude": "53.060112"},
+            format="json",
+        )
+        self.assertEqual(moved.status_code, 400, moved.content[:400])
+        self.assertEqual(
+            Property.objects.get(pk=second_id).latitude, Decimal("35.689198")
+        )
+
+    def test_update_keeping_its_own_location_is_allowed(self):
+        created = self._create(title="ملک ثابت", latitude="36.563421", longitude="53.060112")
+        prop_id = created.json()["id"]
+
+        retitled = self.client.patch(
+            f"/properties/api/properties/{prop_id}/",
+            {
+                "title": "ملک ثابت (ویرایش‌شده)",
+                "latitude": "36.563421",
+                "longitude": "53.060112",
+            },
+            format="json",
+        )
+        self.assertEqual(retitled.status_code, 200, retitled.content[:400])
+
+    def test_update_without_coordinates_is_not_blocked(self):
+        created = self._create(title="ملک بدون موقعیت")
+        prop_id = created.json()["id"]
+
+        retitled = self.client.patch(
+            f"/properties/api/properties/{prop_id}/",
+            {"title": "بدون مختصات"},
+            format="json",
+        )
+        self.assertEqual(retitled.status_code, 200, retitled.content[:400])

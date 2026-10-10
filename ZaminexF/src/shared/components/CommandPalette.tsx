@@ -62,7 +62,6 @@ function CommandPalette({ open, onClose, navigate, role }: { open: boolean; onCl
     }
   }, [open]);
 
-  // Handle ESC key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && open) {

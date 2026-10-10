@@ -1,21 +1,3 @@
-"""The API error envelope must carry a machine-readable ``code``.
-
-Why this exists
----------------
-Every message the API returns is translated to Persian, which makes ``detail``
-useless as a signal for the SPA: an expired session and a genuine permission
-denial are both ``403`` with a Persian sentence. Matching on that sentence
-would break the moment the wording is improved.
-
-``persian_exception_handler`` therefore also emits DRF's stable ``code``
-alongside ``detail``. The frontend switches on it to send an expired session
-back to the login page while showing a plain error for anything else.
-
-These tests pin the codes the frontend relies on, and — just as important —
-pin that field-error payloads are left alone, so a serializer field called
-``code`` can never be shadowed.
-"""
-
 import io
 
 from django.contrib.auth import get_user_model
@@ -30,8 +12,6 @@ PASSWORD = "pw-secret-1"
 
 
 class ErrorCodeEnvelopeTests(TestCase):
-    """Each failure mode reports the code the SPA expects."""
-
     @classmethod
     def setUpTestData(cls):
         call_command("seed_basics", stdout=io.StringIO())
@@ -55,9 +35,8 @@ class ErrorCodeEnvelopeTests(TestCase):
         self.assertEqual(resp.json()["code"], "not_authenticated")
 
     def test_expired_session_reports_not_authenticated(self):
-        """The signal the SPA uses to bounce the user back to the login page."""
         self.client.force_login(self.admin)
-        self.client.logout()  # the tab is still open, the session is gone
+        self.client.logout()
 
         resp = self.client.post(
             "/basics/api/provinces/",
@@ -68,7 +47,6 @@ class ErrorCodeEnvelopeTests(TestCase):
         self.assertEqual(resp.json()["code"], "not_authenticated")
 
     def test_permission_denial_reports_permission_denied(self):
-        """A role denial must NOT look like an expired session."""
         self.client.force_login(self.agent)
         resp = self.client.post(
             "/basics/api/provinces/",
@@ -79,7 +57,6 @@ class ErrorCodeEnvelopeTests(TestCase):
         self.assertEqual(resp.json()["code"], "permission_denied")
 
     def test_csrf_failure_reports_its_own_code(self):
-        """CSRF is a session problem, but a different one from being logged out."""
         client = Client(enforce_csrf_checks=True)
         client.force_login(self.admin)
         client.get("/accounts/login/")
@@ -100,7 +77,6 @@ class ErrorCodeEnvelopeTests(TestCase):
         self.assertEqual(resp.json()["code"], "not_found")
 
     def test_detail_message_is_still_persian(self):
-        """The code is additive: the human-readable text must not change."""
         self.client.force_login(self.agent)
         resp = self.client.post(
             "/basics/api/provinces/",
@@ -113,8 +89,6 @@ class ErrorCodeEnvelopeTests(TestCase):
 
 
 class FieldErrorPayloadTests(TestCase):
-    """Validation errors are keyed by field and must stay untouched."""
-
     @classmethod
     def setUpTestData(cls):
         cls.admin = User.objects.create_user(
@@ -125,7 +99,6 @@ class FieldErrorPayloadTests(TestCase):
         self.client.force_login(self.admin)
 
     def test_validation_errors_get_no_code_key(self):
-        """Adding `code` to a field payload could shadow a real model field."""
         resp = self.client.post(
             "/basics/api/cities/",
             data='{"displayName": "ساری"}',
@@ -146,8 +119,6 @@ class FieldErrorPayloadTests(TestCase):
 
 
 class UploadCsrfTests(TestCase):
-    """Multipart uploads must be CSRF-protected exactly like JSON writes."""
-
     @classmethod
     def setUpTestData(cls):
         cls.admin = User.objects.create_user(

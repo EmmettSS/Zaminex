@@ -1,19 +1,3 @@
-"""SMS login: phone normalization, provider clients and OTP lifecycle.
-
-sms.ir is the primary provider; kavenegar is the automatic fallback. Both are
-called over plain HTTPS with the standard library (no third-party SDK), which
-matches how the AI service already talks to upstream providers and keeps the
-dependency surface minimal.
-
-Security notes
---------------
-- Provider hosts are hard-coded, so the server can never be pointed at an
-  internal host through the settings (no SSRF surface).
-- OTP codes are random (``secrets``) and stored as salted hashes.
-- Codes are single-use, short-lived, replaced on re-request, and limited to a
-  small number of verification attempts.
-"""
-
 from __future__ import annotations
 
 import json
@@ -24,10 +8,11 @@ import urllib.parse
 import urllib.request
 from datetime import timedelta
 
-from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.db import transaction
 from django.utils import timezone
+
+from apps.common import cache_utils
 
 from .models import (
     AdminProfile,
@@ -41,33 +26,35 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Tunable knobs (overridable via settings, sensible defaults otherwise)
-# ---------------------------------------------------------------------------
-
 def otp_length() -> int:
+    from django.conf import settings
+
     return int(getattr(settings, "SMS_OTP_LENGTH", 6))
 
 
 def otp_ttl_seconds() -> int:
+    from django.conf import settings
+
     return int(getattr(settings, "SMS_OTP_TTL_SECONDS", 2 * 60))
 
 
 def otp_max_attempts() -> int:
+    from django.conf import settings
+
     return int(getattr(settings, "SMS_OTP_MAX_ATTEMPTS", 5))
 
 
 def otp_resend_cooldown_seconds() -> int:
+    from django.conf import settings
+
     return int(getattr(settings, "SMS_OTP_RESEND_COOLDOWN_SECONDS", 60))
 
 
 def _request_timeout() -> int:
+    from django.conf import settings
+
     return int(getattr(settings, "SMS_REQUEST_TIMEOUT", 10))
 
-
-# ---------------------------------------------------------------------------
-# Login method (the global switch edited in «پروفایل من → گزینه‌های ورود»)
-# ---------------------------------------------------------------------------
 
 def active_login_method() -> str:
     return LoginSettings.get_solo().method
@@ -80,26 +67,18 @@ def set_login_method(method: str) -> None:
 
 
 def is_sms_configured() -> bool:
-    """True when the primary provider has the minimum it needs to send codes."""
     config = SmsProviderSettings.get_solo()
     return bool(
         config.smsir_api_key_plain and (config.smsir_template_id or "").strip()
     )
 
 
-# ---------------------------------------------------------------------------
-# Phone number normalization
-# ---------------------------------------------------------------------------
-
-_INVALID_MOBILE_MESSAGE = "شماره موبایل معتبر نیست. شماره باید با ۰۹ شروع شود و ۱۱ رقم باشد."
+_INVALID_MOBILE_MESSAGE = (
+    "شماره موبایل معتبر نیست. شماره باید با ۰۹ شروع شود و ۱۱ رقم باشد."
+)
 
 
 def normalize_mobile(raw: str | None) -> str:
-    """Normalize user input to ``09xxxxxxxxx``.
-
-    Accepts ``0912...``, ``912...``, ``98912...`` and ``+98912...``. Raises
-    ``ValueError`` with a Persian message for anything else.
-    """
     digits = "".join(ch for ch in (raw or "") if ch.isdigit())
     if len(digits) == 10 and digits.startswith("9"):
         digits = "0" + digits
@@ -113,25 +92,13 @@ def normalize_mobile(raw: str | None) -> str:
     return digits
 
 
-# ---------------------------------------------------------------------------
-# Account lookup
-# ---------------------------------------------------------------------------
-
 def _inactive_account_message() -> str:
-    # Lazy import: forms.py imports this module, so importing it at module
-    # level here would create a cycle.
     from .forms import INACTIVE_ACCOUNT_MESSAGE
 
     return INACTIVE_ACCOUNT_MESSAGE
 
 
 def find_user_by_mobile(mobile: str):
-    """Return ``(user, reason)`` for a normalized mobile.
-
-    ``user`` is the active account the code belongs to, or ``None`` when no
-    account matches. ``reason`` is a Persian message when an account exists but
-    cannot sign in (archived consultant / disabled user).
-    """
     candidates = []
 
     consultant = (
@@ -144,9 +111,8 @@ def find_user_by_mobile(mobile: str):
 
     admin = AdminProfile.objects.filter(mobile=mobile).select_related("user").first()
     if admin is not None and admin.user.role == UserRole.ADMIN:
-        candidates.append((admin.user, admin.user.is_active, "این حساب کاربری غیرفعال است."))
+        candidates.append((admin.user, admin.is_active, "این حساب کاربری غیرفعال است."))
 
-    # Prefer a working account if several rows share one mobile.
     for user, profile_active, _reason in candidates:
         if user.is_active and profile_active:
             return user, None
@@ -158,20 +124,14 @@ def find_user_by_mobile(mobile: str):
     return None, None
 
 
-# ---------------------------------------------------------------------------
-# OTP lifecycle
-# ---------------------------------------------------------------------------
-
 def _generate_code() -> str:
     return "".join(str(secrets.randbelow(10)) for _ in range(otp_length()))
 
 
 def issue_code(mobile: str) -> str:
-    """Create a fresh code for ``mobile``, invalidating any previous one."""
     code = _generate_code()
     expires_at = timezone.now() + timedelta(seconds=otp_ttl_seconds())
     with transaction.atomic():
-        # One active code per mobile: a re-request revokes the old code.
         SmsLoginCode.objects.filter(mobile=mobile).delete()
         SmsLoginCode.objects.create(
             mobile=mobile,
@@ -189,16 +149,40 @@ def resend_cooldown_remaining(mobile: str) -> int:
     return max(0, otp_resend_cooldown_seconds() - elapsed)
 
 
+def _attempt_counter_key(mobile: str) -> str:
+    return cache_utils.make_key("sms", "attempts", mobile)
+
+
+def failed_verifies(mobile: str) -> int:
+    value = cache_utils.cache_get(_attempt_counter_key(mobile))
+    return value if isinstance(value, int) else 0
+
+
+def mobile_attempt_cap() -> int:
+    return otp_max_attempts() * 2
+
+
+def _note_failed_verify(mobile: str) -> int:
+    total = failed_verifies(mobile) + 1
+    cache_utils.cache_set(_attempt_counter_key(mobile), total, otp_ttl_seconds() * 2)
+    return total
+
+
+def _clear_failed_verifies(mobile: str) -> None:
+    cache_utils.cache_delete(_attempt_counter_key(mobile))
+
+
 class OtpVerificationError(Exception):
-    """Raised when a submitted code cannot be accepted."""
+    pass
 
 
 def verify_code(mobile: str, code: str):
-    """Validate a code and return the matching, sign-in-able user.
+    if failed_verifies(mobile) >= mobile_attempt_cap():
+        raise OtpVerificationError(
+            "به دلیل چند تلاش ناموفق، ورود با کد پیامکی برای این شماره موقتاً متوقف شد. "
+            "کمی بعد دوباره تلاش کنید."
+        )
 
-    Raises ``OtpVerificationError`` (with a Persian message) on any failure,
-    and returns ``None`` (with no error) if no active account owns ``mobile``.
-    """
     record = SmsLoginCode.objects.filter(mobile=mobile).order_by("-created_at").first()
     if record is None:
         raise OtpVerificationError(
@@ -206,10 +190,12 @@ def verify_code(mobile: str, code: str):
         )
 
     now = timezone.now()
-    if record.expires_at <= now:
+    if record.consumed_at is not None:
         raise OtpVerificationError(
-            "کد تأیید منقضی شده است. دوباره درخواست کد بدهید."
+            "این کد قبلاً استفاده شده است. دوباره درخواست کد بدهید."
         )
+    if record.expires_at <= now:
+        raise OtpVerificationError("کد تأیید منقضی شده است. دوباره درخواست کد بدهید.")
 
     if record.attempts >= otp_max_attempts():
         raise OtpVerificationError(
@@ -219,10 +205,12 @@ def verify_code(mobile: str, code: str):
     if not check_password(code, record.code_hash):
         record.attempts += 1
         record.save(update_fields=["attempts"])
+        _note_failed_verify(mobile)
         raise OtpVerificationError("کد تأیید واردشده صحیح نیست.")
 
     record.consumed_at = now
     record.save(update_fields=["consumed_at"])
+    _clear_failed_verifies(mobile)
 
     user, reason = find_user_by_mobile(mobile)
     if user is None:
@@ -234,12 +222,8 @@ def verify_code(mobile: str, code: str):
     return user
 
 
-# ---------------------------------------------------------------------------
-# SMS providers
-# ---------------------------------------------------------------------------
-
 class SmsSendError(Exception):
-    """Raised when a code could not be delivered through any provider."""
+    pass
 
 
 def _truncate(value: str, limit: int = 200) -> str:
@@ -256,11 +240,15 @@ def _http_post(url: str, body: bytes, headers: dict, timeout: int) -> tuple[int,
         detail = ""
         try:
             detail = exc.read().decode("utf-8", errors="replace")
-        except Exception:  # pragma: no cover - defensive
+        except Exception:
             detail = ""
-        raise SmsSendError(f"پاسخ خطا از سرویس پیامک (HTTP {exc.code}): {_truncate(detail)}") from exc
+        raise SmsSendError(
+            f"پاسخ خطا از سرویس پیامک (HTTP {exc.code}): {_truncate(detail)}"
+        ) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise SmsSendError(f"اتصال به سرویس پیامک برقرار نشد: {_truncate(str(exc))}") from exc
+        raise SmsSendError(
+            f"اتصال به سرویس پیامک برقرار نشد: {_truncate(str(exc))}"
+        ) from exc
 
 
 def _smsir_success(body: str) -> bool:
@@ -351,19 +339,19 @@ def _kavenegar_send(config: SmsProviderSettings, mobile: str, code: str) -> None
 
 
 def send_verification_code(mobile: str, code: str) -> None:
-    """Send ``code`` via sms.ir, falling back to kavenegar on any failure."""
     config = SmsProviderSettings.get_solo()
 
     try:
         _smsir_send(config, mobile, code)
         return
-    except Exception as exc:  # noqa: BLE001 - fallback boundary
+    except Exception as exc:
         logger.warning("sms.ir failed, trying kavenegar: %s", exc)
 
     try:
         _kavenegar_send(config, mobile, code)
-    except Exception as exc:  # noqa: BLE001 - converted to a user-facing error
+    except Exception as exc:
         logger.error("Both SMS providers failed: %s", exc)
         raise SmsSendError(
-            "ارسال کد تأیید از هر دو سرویس پیامک ممکن نشد. لطفاً چند لحظه بعد دوباره تلاش کنید."
+            "ارسال کد تأیید از هر دو سرویس پیامک ممکن نشد. "
+            "لطفاً چند لحظه بعد دوباره تلاش کنید."
         ) from exc

@@ -5,26 +5,26 @@ from django.utils import timezone
 
 class Task(models.Model):
     class Status(models.TextChoices):
-        PENDING = "PENDING", "Pending"
-        IN_PROGRESS = "IN_PROGRESS", "In Progress"
-        COMPLETED = "COMPLETED", "Completed"
-        CANCELLED = "CANCELLED", "Cancelled"
+        PENDING = "PENDING", "در انتظار انجام"
+        IN_PROGRESS = "IN_PROGRESS", "در حال انجام"
+        COMPLETED = "COMPLETED", "تکمیل‌شده"
+        CANCELLED = "CANCELLED", "لغوشده"
 
     class Priority(models.TextChoices):
-        LOW = "LOW", "Low"
-        MEDIUM = "MEDIUM", "Medium"
-        HIGH = "HIGH", "High"
-        URGENT = "URGENT", "Urgent"
+        LOW = "LOW", "اولویت کم"
+        MEDIUM = "MEDIUM", "اولویت عادی"
+        HIGH = "HIGH", "اولویت بالا"
+        URGENT = "URGENT", "اولویت فوری"
 
     class TaskType(models.TextChoices):
-        VIEWING = "VIEWING", "Viewing"
-        DOCUMENT = "DOCUMENT", "Document"
-        NEGOTIATION = "NEGOTIATION", "Negotiation"
-        FOLLOW_UP = "FOLLOW_UP", "Follow-Up"
-        ADMINISTRATIVE = "ADMINISTRATIVE", "Administrative"
-        SITE_VISIT = "SITE_VISIT", "Site Visit"
-        CONTRACT = "CONTRACT", "Contract"
-        INSPECTION = "INSPECTION", "Inspection"
+        VIEWING = "VIEWING", "بازدید ملک"
+        DOCUMENT = "DOCUMENT", "بررسی مدارک"
+        NEGOTIATION = "NEGOTIATION", "مذاکره و نشست"
+        FOLLOW_UP = "FOLLOW_UP", "پیگیری مستمر"
+        ADMINISTRATIVE = "ADMINISTRATIVE", "امور اداری و دفتری"
+        SITE_VISIT = "SITE_VISIT", "کارشناسی میدانی"
+        CONTRACT = "CONTRACT", "عقد قرارداد"
+        INSPECTION = "INSPECTION", "بازرسی فنی"
 
     title = models.CharField(
         max_length=255,

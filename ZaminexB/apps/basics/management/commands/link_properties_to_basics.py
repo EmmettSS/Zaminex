@@ -1,24 +1,3 @@
-"""Backfill the new reference-data foreign keys on existing records.
-
-Phase 2 adds ``Property.property_type_ref`` / ``property_usage`` and
-``Listing.deal_type`` alongside the legacy hard-coded columns. This command
-fills them in from the old values so nothing is left dangling:
-
-    Property.property_type  "APARTMENT"  →  PropertyType  "apartment"
-                                         →  PropertyUsage "residential"
-    Property.deal_type      "SALE"       →  DealType      "sale"
-                                            (copied onto that property's listings)
-
-Deal type moves to the *listing* because one property can be advertised for
-sale and for rent at the same time. A listing keeps its own value if it already
-has one; otherwise it inherits from its property.
-
-Idempotent — already-linked rows are skipped, so it is safe to re-run.
-
-    python manage.py link_properties_to_basics --dry-run
-    python manage.py link_properties_to_basics
-"""
-
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
@@ -28,7 +7,6 @@ from apps.basics.models import DealType, PropertyType
 from apps.listings.models import Listing
 from apps.properties.models import Property
 
-# Legacy Property.PropertyType → basics.PropertyType.name
 PROPERTY_TYPE_MAP = {
     "APARTMENT": "apartment",
     "VILLA": "villa",
@@ -42,8 +20,6 @@ PROPERTY_TYPE_MAP = {
     "OTHER": "other",
 }
 
-# Legacy Property.DealType → basics.DealType.name
-# RENT maps to رهن و اجاره, the standard Iranian rental arrangement.
 DEAL_TYPE_MAP = {
     "SALE": "sale",
     "RENT": "mortgage_rent",
@@ -84,7 +60,6 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.MIGRATE_HEADING("\nاتصال املاک به اطلاعات پایه"))
 
-        # --- properties -----------------------------------------------------
         linked = skipped = 0
         unmapped: list[tuple[int, str]] = []
 
@@ -124,7 +99,6 @@ class Command(BaseCommand):
                 )
             )
 
-        # --- listings --------------------------------------------------------
         listing_linked = listing_skipped = 0
         listing_unmapped: list[tuple[int, str]] = []
 
@@ -154,7 +128,6 @@ class Command(BaseCommand):
                 )
             )
 
-        # --- result ----------------------------------------------------------
         if dry_run:
             self.stdout.write(
                 self.style.WARNING("\nاجرای آزمایشی — هیچ تغییری ذخیره نشد.")

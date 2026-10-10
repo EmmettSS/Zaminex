@@ -1,9 +1,9 @@
-"""API endpoints for ticket lists, conversations and protected files."""
-
 from __future__ import annotations
 
 import csv
+import datetime
 import io
+import logging
 from urllib.parse import quote
 
 from django.contrib.auth import get_user_model
@@ -20,7 +20,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.common.activity import log_activity
+from apps.activity.activity import log_activity
 from apps.common.date_filters import (
     apply_datetime_field_range,
     parse_gregorian_date,
@@ -64,10 +64,24 @@ from .services import (
 
 User = get_user_model()
 
+logger = logging.getLogger(__name__)
+
+TICKET_UNREAD_POLL_TTL = 10
+
+
+def cached_ticket_unread_count(user) -> int:
+    from apps.common import cache_utils
+
+    key = cache_utils.make_key("poll", "ticket-unread", user.pk)
+    cached = cache_utils.cache_get(key)
+    if isinstance(cached, int):
+        return cached
+    count = user.ticket_participations.filter(is_read=False).count()
+    cache_utils.cache_set(key, count, TICKET_UNREAD_POLL_TTL)
+    return count
+
 
 class TicketViewSet(viewsets.ModelViewSet):
-    """Role-scoped CRUD facade for the ticket workspace."""
-
     permission_classes = [permissions.IsAuthenticated]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     pagination_class = StandardResultsSetPagination
@@ -97,8 +111,6 @@ class TicketViewSet(viewsets.ModelViewSet):
         user = self.request.user
         queryset = visible_ticket_queryset(user)
 
-        # Folders and filters are list-only. Detail/reply/action routes must
-        # never become 404 merely because a stale list filter is present.
         if getattr(self, "action", None) not in {"list", "export"}:
             return queryset
 
@@ -112,8 +124,6 @@ class TicketViewSet(viewsets.ModelViewSet):
             )
         elif folder == "all":
             if getattr(user, "role", "") != "ADMIN":
-                # Non-admin callers can still use all for convenience, but it
-                # remains the already-scoped sent + received universe.
                 queryset = queryset.filter(
                     Q(created_by_id=user.pk)
                     | Q(
@@ -188,10 +198,21 @@ class TicketViewSet(viewsets.ModelViewSet):
                 participants__user_id=user.pk, participants__is_read=True
             )
 
-        if self.request.query_params.get("overdue") in {"true", "1", "yes"}:
-            queryset = queryset.filter(sla_due_at__lt=timezone.now()).exclude(
+        overdue_state = (self.request.query_params.get("overdue") or "").lower()
+        now = timezone.now()
+        soon_horizon = now + datetime.timedelta(hours=12)
+        if overdue_state in {"true", "1", "yes", "overdue"}:
+            queryset = queryset.filter(sla_due_at__lt=now).exclude(
                 status=TicketStatus.CLOSED
             )
+        elif overdue_state in {"upcoming", "due_soon", "soon"}:
+            queryset = queryset.filter(
+                sla_due_at__gte=now, sla_due_at__lt=soon_horizon
+            ).exclude(status=TicketStatus.CLOSED)
+        elif overdue_state in {"open", "not_due", "inside"}:
+            queryset = queryset.filter(
+                sla_due_at__gte=soon_horizon
+            ).exclude(status=TicketStatus.CLOSED)
 
         sender_id = self.request.query_params.get(
             "senderId"
@@ -207,20 +228,23 @@ class TicketViewSet(viewsets.ModelViewSet):
                 participants__role=TicketParticipantRole.RECIPIENT,
             )
 
-        # Admin monitoring can filter one user in either direction. The
-        # consultant UI never exposes this control; the base scope still makes
-        # a hand-crafted request harmless.
         user_id = self.request.query_params.get(
             "userId"
         ) or self.request.query_params.get("consultantId")
         if user_id and getattr(user, "role", "") == "ADMIN":
-            queryset = queryset.filter(
-                Q(created_by_id=user_id)
-                | Q(
-                    participants__user_id=user_id,
-                    participants__role=TicketParticipantRole.RECIPIENT,
-                )
-            )
+            user_ids = [
+                int(part)
+                for part in str(user_id).split(",")
+                if part.strip().isdigit()
+            ]
+            if user_ids:
+                user_query = Q()
+                for uid in user_ids:
+                    user_query |= Q(created_by_id=uid) | Q(
+                        participants__user_id=uid,
+                        participants__role=TicketParticipantRole.RECIPIENT,
+                    )
+                queryset = queryset.filter(user_query)
 
         subject_id = self.request.query_params.get(
             "subjectId"
@@ -241,8 +265,6 @@ class TicketViewSet(viewsets.ModelViewSet):
                 | Q(related_ticket__ticket_number__icontains=q)
             )
             if getattr(user, "role", "") != "ADMIN":
-                # Do not let a recipient infer the contents of another
-                # recipient's private branch or hidden subject through search.
                 visible_message_match &= (
                     Q(created_by_id=user.pk)
                     | Q(messages__thread_recipient__isnull=True)
@@ -302,13 +324,6 @@ class TicketViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _visible_reply_count_q(user, *, positive: bool):
-        """Build a viewer-scoped answered/unanswered predicate.
-
-        A recipient must not be able to infer that another private branch has
-        replies. Owners and admins can see the global counter; recipients use
-        the denormalized per-participant counter.
-        """
-
         if getattr(user, "role", "") == "ADMIN":
             return Q(reply_count__gt=0) if positive else Q(reply_count=0)
 
@@ -331,8 +346,6 @@ class TicketViewSet(viewsets.ModelViewSet):
         )
 
     def _apply_date_filters(self, queryset):
-        """Apply inclusive Tehran-calendar dates to list/export queries."""
-
         created_from = parse_gregorian_date(
             self.request.query_params.get("createdFrom")
             or self.request.query_params.get("createdDateFrom"),
@@ -380,8 +393,6 @@ class TicketViewSet(viewsets.ModelViewSet):
         except PermissionError as exc:
             raise PermissionDenied(str(exc)) from exc
         if changed:
-            # The queryset's participant prefetch was built before mark_read.
-            # Update its in-memory row so the response immediately says read.
             for participant in getattr(ticket, "_ticket_participants", []) or []:
                 if participant.user_id == request.user.pk:
                     participant.is_read = True
@@ -446,8 +457,6 @@ class TicketViewSet(viewsets.ModelViewSet):
         )
 
     def destroy(self, request, *args, **kwargs):
-        # Ticket history is a business record. Closing/reopening is reversible;
-        # hard deletion would invalidate the audit trail and attachment links.
         raise PermissionDenied("حذف تیکت مجاز نیست؛ تیکت را ببندید یا بایگانی کنید.")
 
     @action(detail=True, methods=["post"])
@@ -487,8 +496,6 @@ class TicketViewSet(viewsets.ModelViewSet):
             )
             raise serializers.ValidationError(detail) from exc
 
-        # Reuse retrieve's visibility logic without an extra notification or
-        # read-audit event; the actor's own reply is already read for them.
         messages = (
             TicketMessage.objects.filter(ticket=updated)
             .select_related("sender", "thread_recipient")
@@ -554,8 +561,7 @@ class TicketViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="unread-count")
     def unread_count(self, request):
-        count = request.user.ticket_participations.filter(is_read=False).count()
-        return Response({"count": count})
+        return Response({"count": cached_ticket_unread_count(request.user)})
 
     @action(detail=False, methods=["get"])
     def export(self, request):
@@ -565,8 +571,6 @@ class TicketViewSet(viewsets.ModelViewSet):
 
         def safe_csv(value):
             text = "" if value is None else str(value)
-            # Prevent spreadsheet formula injection when user-controlled titles
-            # are opened in Excel/LibreOffice.
             return f"'{text}" if text[:1] in {"=", "+", "-", "@"} else text
 
         def stream():
@@ -813,9 +817,7 @@ class TicketUnreadCountView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        return Response(
-            {"count": request.user.ticket_participations.filter(is_read=False).count()}
-        )
+        return Response({"count": cached_ticket_unread_count(request.user)})
 
 
 class TicketAttachmentDownloadView(APIView):
@@ -828,16 +830,25 @@ class TicketAttachmentDownloadView(APIView):
             TicketAttachment.objects.select_related("message__ticket"), pk=pk
         )
         if not can_view_ticket(request.user, attachment.message.ticket):
-            # Do not distinguish "missing" from "not yours" for opaque file
-            # ids; it prevents an attachment-id oracle.
             raise Http404("پیوست یافت نشد.")
         if not attachment.file:
+            logger.warning(
+                "پیوست تیکت %s هیچ فایلی ثبت نشده است (پیام %s).",
+                attachment.pk,
+                attachment.message_id,
+            )
             return Response(
                 {"detail": "فایل یافت نشد."}, status=status.HTTP_404_NOT_FOUND
             )
         try:
             file_handle = attachment.file.open("rb")
-        except (FileNotFoundError, OSError):
+        except (FileNotFoundError, OSError) as exc:
+            logger.warning(
+                "فایل پیوست تیکت %s روی دیسک نیست: %s (%s)",
+                attachment.pk,
+                attachment.file.name,
+                exc,
+            )
             return Response(
                 {"detail": "فایل یافت نشد."}, status=status.HTTP_404_NOT_FOUND
             )

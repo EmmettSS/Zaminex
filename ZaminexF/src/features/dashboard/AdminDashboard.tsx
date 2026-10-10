@@ -25,6 +25,8 @@ import { Building2, FileText, CheckSquare, BellRing, Users, Activity, Settings, 
 import { PIE_COLORS, CHART_COLORS } from "../../shared/lib/constants";
 import { formatJalali, formatJalaliDT, formatJalaliDateTime } from "../../shared/lib/jdate";
 import { TaskDetailModal } from "../../shared/components/TaskDetailModal";
+import { PropertyDistributionMap, type DistributionPoint } from "../../shared/components/ui/PropertyDistributionMap";
+import { consultantMarkerColor, CONSULTANT_FALLBACK_COLOR } from "../../shared/lib/consultantColors";
 function AdminDashboard({
   kpis,
   navigate,
@@ -37,6 +39,7 @@ function AdminDashboard({
   revenueDealTypes = [],
   propertyComposition = [],
   hotProperties = [],
+  located = [],
   properties = [],
   onSaveTask,
   onDeleteTask,
@@ -52,6 +55,7 @@ function AdminDashboard({
   revenueDealTypes?: Array<{ name: string; label: string }>;
   propertyComposition?: Array<{ name: string; value: number; count: number; percentage: number }>;
   hotProperties?: Array<{ id?: number; title?: string; neighborhood?: string; engagementHeatScore?: number; daysOnMarket?: number | null }>;
+  located?: Property[];
   properties?: Property[];
   onSaveTask?: (id: string, patch: Record<string, any>) => Promise<void>;
   onDeleteTask?: (id: string) => Promise<void>;
@@ -106,10 +110,50 @@ function AdminDashboard({
   const dealTypes = useMemo(() => revenueDealTypes || [], [revenueDealTypes]);
   const hasRevenue = revenueData.some((m) => (m.revenue || 0) > 0 || (m.count || 0) > 0);
 
-  // `upcomingFollowups` already arrives sorted (overdue first, then newest
-  // activity, with a stable id tie-breaker) and trimmed to five. Re-sorting it
-  // here by the overdue flag alone would discard that recency order, so the
-  // list is rendered exactly as received.
+  const locatedProperties = useMemo<DistributionPoint[]>(
+    () =>
+      (located || [])
+        .filter((p) => p.latitude != null && p.longitude != null)
+        .map((p) => ({
+          id: p.id,
+          title: p.title,
+          lat: Number(p.latitude),
+          lng: Number(p.longitude),
+          status: String((p as any).propertyStatus || "").toUpperCase(),
+          area: Number(p.area || 0),
+          consultantId: ((p as any).consultantId ?? null) as string | number | null,
+          consultantName: ((p as any).consultantName as string) || "نامشخص",
+        })),
+    [located]
+  );
+
+  const consultantColorLegend = useMemo(() => {
+    const ids = locatedProperties.map((p) => p.consultantId);
+    const byId = new Map<string, { name: string; count: number }>();
+    locatedProperties.forEach((p) => {
+      const key = p.consultantId == null ? "__none__" : String(p.consultantId);
+      const entry = byId.get(key) || { name: p.consultantName || "نامشخص", count: 0 };
+      entry.count += 1;
+      byId.set(key, entry);
+    });
+    const rows = Array.from(byId.entries()).map(([id, entry]) => ({
+      id,
+      name: entry.name,
+      count: entry.count,
+      color:
+        id === "__none__"
+          ? CONSULTANT_FALLBACK_COLOR
+          : consultantMarkerColor(Number(id), ids),
+    }));
+    rows.sort((a, b) => {
+      const na = Number(a.id);
+      const nb = Number(b.id);
+      if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+      return a.name.localeCompare(b.name);
+    });
+    return rows;
+  }, [locatedProperties]);
+
   const overdueTasks = useMemo(
     () => tasks.filter((t) => isTaskOverdue(t)),
     [tasks]
@@ -272,6 +316,28 @@ function AdminDashboard({
           </div>
         )}
       </Card>
+      <Card className="p-5">
+        <div className="mb-4">
+          <h2 className="text-sm font-semibold">نقشه توزیع املاک</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">موقعیت جغرافیایی املاک واگذارشده به مشاورها روی نقشه؛ رنگ نشانگر بر اساس مشاور است.</p>
+        </div>
+        {locatedProperties.length === 0 ? (
+          <p className="py-10 text-center text-xs text-muted-foreground">هنوز موقعیت جغرافیایی ملکی ثبت نشده است.</p>
+        ) : (
+          <>
+            <PropertyDistributionMap points={locatedProperties} colorMode="consultant" badgeLabel="نقشهٔ توزیع املاک" />
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5 max-h-36 overflow-y-auto rounded-lg border border-border p-2">
+              {consultantColorLegend.map((row) => (
+                <span key={row.id} className="flex items-center gap-1.5 text-[11px] text-muted-foreground min-w-0">
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: row.color }} />
+                  <span className="min-w-0 truncate" title={row.name}>{row.name}</span>
+                  <span className="font-semibold text-foreground/70 flex-shrink-0">{row.count.toLocaleString("fa-IR")}</span>
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+      </Card>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="p-5">
           <div className="flex items-center justify-between mb-3"><h2 className="text-sm font-semibold">مشاوران برتر</h2><button onClick={() => navigate("consultants")} className="text-xs text-primary hover:underline">مشاهده همه</button></div>
@@ -387,9 +453,6 @@ function AdminDashboard({
   );
 }
 
-// =============================================================================
-//  Properties Page
-// =============================================================================
 
 const formatPriceDeviation = (idx?: number | null) => {
   if (idx == null || Number.isNaN(idx)) return "—";

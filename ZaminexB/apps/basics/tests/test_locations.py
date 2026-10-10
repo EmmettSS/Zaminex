@@ -1,5 +1,3 @@
-"""Tests for the Province → City → District hierarchy (phase 4)."""
-
 import io
 
 from django.contrib.auth import get_user_model
@@ -9,6 +7,7 @@ from django.test import TestCase
 
 from apps.basics.models import City, District, Province, PropertyType
 from apps.common.models import District as LegacyDistrict
+from apps.common.testing import CacheClearingMixin
 from apps.properties.models import Property
 
 User = get_user_model()
@@ -64,8 +63,6 @@ class HierarchyModelTests(TestCase):
 
 
 class NeighborhoodSyncTests(TestCase):
-    """The legacy text column must track the linked district."""
-
     @classmethod
     def setUpTestData(cls):
         cls.agent = User.objects.create_user(
@@ -96,7 +93,6 @@ class NeighborhoodSyncTests(TestCase):
         self.assertEqual(prop.neighborhood, "مرکزی")
 
     def test_renaming_a_district_propagates_on_the_next_save(self):
-        """Reports group by the text column, so it cannot go stale."""
         prop = self._property(district=self.district)
 
         self.district.display_name = "مرکزی جدید"
@@ -112,7 +108,6 @@ class NeighborhoodSyncTests(TestCase):
         self.assertIsNone(prop.district)
 
     def test_a_district_in_use_cannot_be_removed(self):
-        """Property.district is PROTECT, guarding the history."""
         from django.db.models import ProtectedError
 
         self._property(district=self.district)
@@ -120,7 +115,7 @@ class NeighborhoodSyncTests(TestCase):
             self.district.delete(hard=True)
 
 
-class LocationAPITests(TestCase):
+class LocationAPITests(CacheClearingMixin, TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.admin = User.objects.create_user(
@@ -159,7 +154,6 @@ class LocationAPITests(TestCase):
         self.assertEqual(payload[0]["cities"][0]["districts"], [])
 
     def test_an_admin_creates_a_province_from_the_label_alone(self):
-        """The UI only asks for the Persian name; the key is derived."""
         self.client.force_login(self.admin)
         response = self.client.post(
             "/basics/api/provinces/", {"displayName": "گیلان"}, content_type="application/json"
@@ -247,7 +241,6 @@ class LocationAPITests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_the_legacy_name_list_reads_from_the_hierarchy(self):
-        """DistrictCombobox and the property filter still call this."""
         self.client.force_login(self.agent)
         payload = self.client.get("/common/api/districts/").json()
         self.assertIn("مرکزی", payload)
@@ -275,6 +268,12 @@ class PropertyLocationAPITests(TestCase):
     def setUp(self):
         self.client.force_login(self.admin)
 
+    OWNER_FIELDS = {
+        "ownerFirstName": "تست",
+        "ownerLastName": "تستی",
+        "ownerPhone": "09121234567",
+    }
+
     def test_creating_with_district_id_fills_the_location_fields(self):
         response = self.client.post(
             "/properties/api/properties/",
@@ -286,6 +285,7 @@ class PropertyLocationAPITests(TestCase):
                 "districtId": self.district.pk,
                 "fullAddress": "ساری",
                 "consultant": self.agent.pk,
+                **self.OWNER_FIELDS,
             },
             content_type="application/json",
         )
@@ -301,7 +301,6 @@ class PropertyLocationAPITests(TestCase):
         )
 
     def test_the_legacy_text_only_payload_still_works(self):
-        """Older callers send a plain name and must keep working."""
         response = self.client.post(
             "/properties/api/properties/",
             {
@@ -312,6 +311,7 @@ class PropertyLocationAPITests(TestCase):
                 "district": "محله آزاد",
                 "fullAddress": "ساری",
                 "consultant": self.agent.pk,
+                **self.OWNER_FIELDS,
             },
             content_type="application/json",
         )
@@ -330,6 +330,7 @@ class PropertyLocationAPITests(TestCase):
                 "districtId": self.district.pk,
                 "fullAddress": "ساری",
                 "consultant": self.agent.pk,
+                **self.OWNER_FIELDS,
             },
             content_type="application/json",
         )
@@ -439,8 +440,6 @@ class DistrictMigrationCommandTests(TestCase):
 
 
 class LocationCreateAPITests(TestCase):
-    """Province/City/District creation must persist and return immediately."""
-
     @classmethod
     def setUpTestData(cls):
         cls.admin = User.objects.create_user(
@@ -501,7 +500,6 @@ class LocationCreateAPITests(TestCase):
         self.assertEqual(rows[1]["displayName"], "مرکزی")
 
     def test_city_requires_province_with_a_clear_message(self):
-        """A city without its parent must fail validation and name the field."""
         response = self._post("/basics/api/cities/", {"displayName": "بدون استان"})
         self.assertEqual(response.status_code, 400)
         payload = response.json()
@@ -509,7 +507,6 @@ class LocationCreateAPITests(TestCase):
         self.assertEqual(str(payload["province"][0]), "انتخاب استان الزامی است.")
 
     def test_district_requires_city_with_a_clear_message(self):
-        """A district without its parent must fail validation and name the field."""
         response = self._post(
             "/basics/api/districts/", {"displayName": "بدون شهر"}
         )
@@ -519,7 +516,6 @@ class LocationCreateAPITests(TestCase):
         self.assertEqual(str(payload["city"][0]), "انتخاب شهر الزامی است.")
 
     def test_city_accepts_parent_as_string_like_the_spa_sends(self):
-        """The SPA sends the parent id as a string; DRF must coerce it."""
         province = Province.objects.create(
             name="string-parent", display_name="استان رشته‌ای"
         )
@@ -531,7 +527,6 @@ class LocationCreateAPITests(TestCase):
         self.assertEqual(City.objects.get(pk=response.json()["id"]).province, province)
 
     def test_district_accepts_parent_as_string_like_the_spa_sends(self):
-        """The SPA sends the parent id as a string; DRF must coerce it."""
         province = Province.objects.create(
             name="string-parent-2", display_name="استان رشته‌ای ۲"
         )
@@ -549,19 +544,6 @@ class LocationCreateAPITests(TestCase):
 
 
 class SystemKeyGenerationTests(TestCase):
-    """The label alone must be enough to create a row.
-
-    The management screen never asks for ``name`` — the English system key —
-    so the API has to derive it. It used to be filled in ``validate()``, which
-    only runs *after* every field has been validated: the moment ``name`` was
-    treated as required the request died first with a bare
-    "این مقدار لازم است." naming a field the form does not even show, and cities
-    and districts could not be added at all (provinces were unaffected).
-
-    The key is now supplied in ``to_internal_value``, before field validation,
-    so these tests pin the behaviour from the outside: label in, row created.
-    """
-
     @classmethod
     def setUpTestData(cls):
         cls.admin = User.objects.create_user(
@@ -593,7 +575,6 @@ class SystemKeyGenerationTests(TestCase):
         self.assertEqual(response.json()["name"], "گلسار")
 
     def test_a_label_with_no_slug_still_yields_a_key(self):
-        """Punctuation-only labels slugify to "", which must not blank the key."""
         response = self._post(
             "/basics/api/cities/",
             {"displayName": "...", "province": self.province.pk},
@@ -625,7 +606,6 @@ class SystemKeyGenerationTests(TestCase):
         self.assertEqual(response.json()["name"], "custom-key")
 
     def test_an_over_long_label_does_not_overflow_the_key_column(self):
-        """A long label must not reach the database as an oversized varchar."""
         response = self._post(
             "/basics/api/cities/",
             {"displayName": "شهر " * 30, "province": self.province.pk},
@@ -635,7 +615,6 @@ class SystemKeyGenerationTests(TestCase):
         self.assertLessEqual(len(response.json()["name"]), max_length)
 
     def test_editing_keeps_the_original_key(self):
-        """A rename must not rewrite the key — other rows may reference it."""
         original = self.city.name
         self.client.force_login(self.admin)
         response = self.client.patch(
@@ -649,12 +628,11 @@ class SystemKeyGenerationTests(TestCase):
         self.assertEqual(self.city.display_name, "رشت مرکزی")
 
     def test_a_soft_deleted_row_still_reserves_its_key(self):
-        """Re-using a label after a delete must not collide on the key."""
         first = self._post(
             "/basics/api/districts/", {"displayName": "سبزه‌میدان", "city": self.city.pk}
         )
         self.assertEqual(first.status_code, 201, first.content[:300])
-        District.objects.get(pk=first.json()["id"]).delete()  # soft delete
+        District.objects.get(pk=first.json()["id"]).delete()
 
         second = self._post(
             "/basics/api/districts/", {"displayName": "سبزه‌میدان", "city": self.city.pk}

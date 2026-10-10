@@ -82,8 +82,5 @@ function Sidebar({ role, page, navigate, collapsed, setCollapsed, userName, user
   );
 }
 
-// =============================================================================
-//  Top Bar
-// =============================================================================
 
 export { Sidebar };
